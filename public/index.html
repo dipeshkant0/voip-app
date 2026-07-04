@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>CallMee</title>
+  <style>
+    :root {
+      --bg-0: #07111f;
+      --bg-1: #0c1728;
+      --bg-2: #101d33;
+      --surface: rgba(12, 23, 40, 0.84);
+      --surface-strong: rgba(18, 31, 52, 0.95);
+      --surface-soft: rgba(255, 255, 255, 0.04);
+      --stroke: rgba(148, 163, 184, 0.18);
+      --stroke-strong: rgba(148, 163, 184, 0.28);
+      --text: #ecf4ff;
+      --muted: #9fb1c9;
+      --muted-2: #6d7f98;
+      --accent: #75b7ff;
+      --accent-strong: #3b82f6;
+      --success: #27d39b;
+      --warning: #f7c948;
+      --danger: #ff6b81;
+      --shadow: 0 24px 90px rgba(0, 0, 0, 0.42);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+      --font: "Inter", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: var(--font);
+      background:
+        radial-gradient(circle at top left, rgba(59, 130, 246, 0.25), transparent 28%),
+        radial-gradient(circle at top right, rgba(39, 211, 155, 0.14), transparent 26%),
+        linear-gradient(145deg, var(--bg-0), var(--bg-1) 52%, var(--bg-2));
+      background-attachment: fixed;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: auto;
+      width: 28rem;
+      height: 28rem;
+      border-radius: 999px;
+      filter: blur(70px);
+      opacity: 0.28;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::before {
+      top: -8rem;
+      left: -8rem;
+      background: rgba(59, 130, 246, 0.52);
+    }
+
+    body::after {
+      right: -10rem;
+      bottom: -10rem;
+      background: rgba(39, 211, 155, 0.34);
+    }
+
+    .app-shell {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+    }
+
+    .frame {
+      width: min(1180px, 100%);
+      border: 1px solid var(--stroke);
+      border-radius: calc(var(--radius-xl) + 8px);
+      background: linear-gradient(180deg, rgba(12, 23, 40, 0.92), rgba(8, 16, 29, 0.88));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(18px);
+    }
+
+    .frame-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 22px 26px;
+      border-bottom: 1px solid var(--stroke);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(135deg, rgba(117, 183, 255, 0.95), rgba(39, 211, 155, 0.9));
+      color: #05111f;
+      box-shadow: 0 12px 28px rgba(59, 130, 246, 0.25);
+      flex: none;
+    }
+
+    .brand-copy {
+      min-width: 0;
+    }
+
+    .brand-copy h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-copy p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    .room-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--stroke);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--muted);
+      font-size: 0.9rem;
+      white-space: nowrap;
+    }
+
+    .room-chip strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .workspace {
+      padding: 26px;
+    }
+
+    .panel {
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius-xl);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    }
+
+    #roomView {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .hero {
+      padding: 34px;
+      border-radius: var(--radius-xl);
+      background:
+        radial-gradient(circle at top right, rgba(117, 183, 255, 0.18), transparent 34%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
+      border: 1px solid var(--stroke);
+      min-height: 420px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 28px;
+    }
+
+    .hero-copy h2 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.8rem);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+    }
+
+    .hero-copy p {
+      margin: 18px 0 0;
+      max-width: 48ch;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .pill {
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--stroke);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .join-card {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding: 30px;
+      border-radius: var(--radius-xl);
+      background: var(--surface);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(14px);
+    }
+
+    .join-card h3,
+    .section-title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .join-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .input-group {
+      display: grid;
+      gap: 12px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      appearance: none;
+      border: 1px solid var(--stroke-strong);
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      padding: 14px 16px;
+      font-size: 0.98rem;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    input[type="text"]::placeholder,
+    input[type="password"]::placeholder {
+      color: var(--muted-2);
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    select:focus {
+      border-color: rgba(117, 183, 255, 0.8);
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18);
+    }
+
+    .join-meta {
+      display: grid;
+      gap: 10px;
+      padding: 16px 18px;
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    .join-meta strong {
+      color: var(--text);
+    }
+
+    .actions {
+      display: grid;
+      gap: 10px;
+    }
+
+    .actions.split {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: var(--radius-md);
+      padding: 13px 16px;
+      font: inherit;
+      font-weight: 700;
+      color: white;
+      background: linear-gradient(135deg, var(--accent-strong), #5b9cff);
+      cursor: pointer;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, background 0.18s ease;
+      box-shadow: 0 12px 24px rgba(59, 130, 246, 0.22);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--stroke);
+      box-shadow: none;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #e4586f, #ff7085);
+      box-shadow: 0 12px 24px rgba(255, 107, 129, 0.22);
+    }
+
+    #callView {
+      display: none;
+      gap: 20px;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 20px;
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--stroke);
+      flex-wrap: wrap;
+    }
+
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--warning);
+      box-shadow: 0 0 0 4px rgba(247, 201, 72, 0.15);
+      flex: none;
+    }
+
+    .status-copy {
+      min-width: 0;
+    }
+
+    .status-copy .label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    #statusText {
+      display: block;
+      margin-top: 4px;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(247, 201, 72, 0.25);
+      background: rgba(247, 201, 72, 0.12);
+      color: #ffe7a3;
+      font-size: 0.88rem;
+      font-weight: 600;
+      line-height: 1;
+    }
+
+    .status-badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #f7c948;
+      box-shadow: 0 0 0 4px rgba(247, 201, 72, 0.16);
+      flex: none;
+    }
+
+    .status-badge.is-hidden {
+      display: none;
+    }
+
+    .stat {
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--stroke);
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      gap: 20px;
+    }
+
+    .card {
+      padding: 22px;
+      border-radius: var(--radius-xl);
+      background: var(--surface);
+      border: 1px solid var(--stroke);
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .card-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    .participant-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .participant-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      background: rgba(255, 255, 255, 0.03);
+      transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .participant-item.active-speaker {
+      border-color: rgba(39, 211, 155, 0.6);
+      box-shadow: 0 0 12px rgba(39, 211, 155, 0.2), inset 0 0 8px rgba(39, 211, 155, 0.1);
+    }
+
+    .participant-meta {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .participant-name {
+      font-weight: 700;
+      font-size: 0.95rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .participant-status {
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.3;
+    }
+
+    .participant-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .participant-badge.audio {
+      color: #9ff3cf;
+      background: rgba(39, 211, 155, 0.12);
+      border-color: rgba(39, 211, 155, 0.22);
+    }
+
+    .participant-badge.connecting {
+      color: #ffe7a3;
+      background: rgba(247, 201, 72, 0.12);
+      border-color: rgba(247, 201, 72, 0.22);
+    }
+
+    .participant-badge.offline {
+      color: #d6e1f4;
+      background: rgba(148, 163, 184, 0.12);
+      border-color: rgba(148, 163, 184, 0.2);
+    }
+
+    .participant-badge.error {
+      color: #ffc3cf;
+      background: rgba(255, 107, 129, 0.12);
+      border-color: rgba(255, 107, 129, 0.22);
+    }
+
+    .participant-empty {
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px dashed rgba(148, 163, 184, 0.18);
+      color: var(--muted-2);
+      font-size: 0.92rem;
+      line-height: 1.5;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .control-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+    }
+
+    .chat-shell {
+      display: grid;
+      gap: 12px;
+    }
+
+    #chatBox {
+      min-height: 280px;
+      max-height: 360px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 16px;
+      border-radius: var(--radius-lg);
+      background: rgba(4, 10, 18, 0.4);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+    }
+
+    .chat-msg {
+      max-width: min(88%, 28rem);
+      width: fit-content;
+      padding: 11px 13px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      line-height: 1.5;
+      font-size: 0.95rem;
+      word-break: break-word;
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      animation: popIn 0.18s ease-out;
+    }
+
+    .chat-msg.self {
+      align-self: flex-end;
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.96), rgba(93, 156, 255, 0.92));
+      border-color: rgba(117, 183, 255, 0.25);
+    }
+
+    .chat-empty {
+      margin: auto;
+      color: var(--muted-2);
+      text-align: center;
+      font-size: 0.94rem;
+      line-height: 1.6;
+      max-width: 28ch;
+    }
+
+    .chat-input-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 10px;
+    }
+
+    .chat-input-row button {
+      min-width: 98px;
+    }
+
+    .footnote {
+      margin-top: 18px;
+      color: var(--muted-2);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
+    #toastContainer {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 50;
+      display: grid;
+      gap: 10px;
+      width: min(360px, calc(100vw - 40px));
+      pointer-events: none;
+    }
+
+    .toast {
+      pointer-events: auto;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(10, 18, 30, 0.92);
+      border: 1px solid var(--stroke);
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+      color: var(--text);
+      animation: toastIn 0.18s ease-out;
+    }
+
+    .toast.success {
+      border-left: 4px solid var(--success);
+    }
+
+    .toast.error {
+      border-left: 4px solid var(--danger);
+    }
+
+    .toast.info {
+      border-left: 4px solid var(--accent);
+    }
+
+    #video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      width: 100%;
+    }
+
+    #video-grid video {
+      width: 100%;
+      border-radius: var(--radius-lg);
+      background: var(--bg-1);
+      border: 1px solid var(--stroke);
+      aspect-ratio: 16/9;
+      object-fit: contain;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @keyframes toastIn {
+      from {
+        transform: translateY(12px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    @keyframes popIn {
+      from {
+        transform: translateY(4px) scale(0.98);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+      }
+    }
+
+    @media (max-width: 980px) {
+
+      #roomView,
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        min-height: unset;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .app-shell {
+        padding: 14px;
+      }
+
+      .frame-header,
+      .workspace,
+      .hero,
+      .join-card,
+      .card {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+
+      .frame-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .actions.split,
+      .button-grid,
+      .chat-input-row {
+        grid-template-columns: 1fr;
+      }
+
+      .button-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app-shell">
+    <section class="frame" aria-label="VoIP application">
+      <header class="frame-header">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          </div>
+          <div class="brand-copy">
+            <h1>CALL MEE</h1>
+            <p>Low-latency audio rooms with direct peer chat and defensive signaling.</p>
+          </div>
+        </div>
+        <div class="room-chip" id="roomChip">
+          Room:
+          <strong id="roomChipValue">Not joined</strong>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <section id="roomView">
+          <div class="hero panel">
+            <div class="hero-copy">
+              <h2>Join a room and start a clean voice session.</h2>
+              <p>
+                Each room creates a direct peer mesh for audio and chat. The app now validates room names,
+                recovers from partial failures, and keeps the call state consistent when devices or connections change.
+              </p>
+            </div>
+
+            <div class="pill-row" aria-hidden="true">
+              <span class="pill">Audio only</span>
+              <span class="pill">Device-aware</span>
+              <span class="pill">Room capacity enforced</span>
+              <span class="pill">Direct peer chat</span>
+            </div>
+          </div>
+
+          <aside class="join-card">
+            <div>
+              <h3>Enter room details</h3>
+              <p>Use a short room name with letters, numbers, dashes, or underscores.</p>
+            </div>
+
+            <div class="input-group">
+              <label class="sr-only" for="usernameInput">Display Name</label>
+              <input type="text" id="usernameInput" placeholder="Your Display Name" autocomplete="name"
+                maxlength="32" />
+
+              <label class="sr-only" for="roomInput">Room ID</label>
+              <input type="text" id="roomInput" placeholder="Room ID (e.g. design-review-12)" autocomplete="off"
+                inputmode="text" maxlength="64" />
+
+              <label class="sr-only" for="passwordInput">Room Password</label>
+              <input type="password" id="passwordInput" placeholder="Room Password (optional)"
+                autocomplete="current-password" maxlength="128" />
+
+              <button id="joinBtn">Initialize Connection</button>
+            </div>
+
+            <div class="join-meta">
+              <div><strong>Recommended:</strong> keep room IDs short and unguessable.</div>
+              <div><strong>Note:</strong> rooms are limited to six people for stable audio and chat.</div>
+            </div>
+          </aside>
+        </section>
+
+        <section id="callView">
+          <div class="status-bar">
+            <div class="status-group">
+              <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+              <div class="status-copy">
+                <span class="label">System Status</span>
+                <span id="statusText">Awaiting handshake...</span>
+              </div>
+            </div>
+            <div class="stats">
+              <span class="status-badge is-hidden" id="micWarningBadge" role="status" aria-live="polite">
+                Mic unavailable
+              </span>
+              <span class="stat" id="peerCount">Peers: 0</span>
+              <span class="stat" id="socketState">Socket: disconnected</span>
+            </div>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="card controls-card">
+              <div class="card-head">
+                <div>
+                  <h3 class="section-title">Hardware controls</h3>
+                  <p>Choose your microphone, mute locally, or copy a room invite link.</p>
+                </div>
+              </div>
+
+              <div class="control-stack">
+                <label class="sr-only" for="deviceSelect">Microphone device</label>
+                <select id="deviceSelect">
+                  <option value="">Detecting audio hardware...</option>
+                </select>
+                <div class="button-grid">
+                  <button id="muteBtn" class="btn-secondary" disabled>Mute Mic</button>
+                  <button id="videoBtn" class="btn-secondary" disabled>Turn on Camera</button>
+                  <button id="screenShareBtn" class="btn-secondary" disabled>Share Screen</button>
+                  <button id="recordBtn" class="btn-secondary" disabled>Record</button>
+                  <button id="retryMicBtn" class="btn-secondary">Refresh Mic</button>
+                  <button id="copyLinkBtn" class="btn-secondary">Invite</button>
+                  <button id="hangupBtn" class="btn-danger">Leave Call</button>
+                </div>
+              </div>
+
+              <div class="footnote">
+                If permissions are denied or hardware changes mid-call, the app will fall back gracefully and keep the
+                room stable.
+              </div>
+            </section>
+
+            <section class="card participants-card">
+              <div class="card-head">
+                <div>
+                  <h3 class="section-title">Participants</h3>
+                  <p>Live room membership and connection state for each peer.</p>
+                </div>
+              </div>
+              <div class="participant-list" id="participantList">
+                <div class="participant-empty">Join a room to see participants appear here.</div>
+              </div>
+            </section>
+
+
+
+            <section class="card chat-card">
+              <div class="card-head">
+                <div>
+                  <h3 class="section-title">Data channel</h3>
+                  <p>Messages broadcast to everyone in the room with an open data channel.</p>
+                </div>
+              </div>
+
+              <div class="chat-shell">
+                <div id="chatBox" aria-live="polite">
+                  <div class="chat-empty">Join a room to start exchanging messages.</div>
+                </div>
+                <div class="chat-input-row">
+                  <input type="file" id="fileInput" class="sr-only" />
+                  <button id="attachFileBtn" class="btn-secondary" disabled title="Send File" aria-label="Send File">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round">
+                      <path
+                        d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48">
+                      </path>
+                    </svg>
+                  </button>
+                  <label class="sr-only" for="chatInput">Message</label>
+                  <input type="text" id="chatInput" placeholder="Type a message..." disabled maxlength="4000" />
+                  <button id="sendBtn" disabled>Send</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="card video-card">
+              <div class="card-head">
+                <div>
+                  <h3 class="section-title">Video stage</h3>
+                  <p>Local camera, screen share, and participant video appear here when enabled.</p>
+                </div>
+              </div>
+              <div id="video-grid" aria-live="polite"></div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/config.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>
