@@ -92,9 +92,13 @@
       font-weight: 600;
       font-size: 1rem;
       cursor: pointer;
-      transition: opacity 0.2s;
+      transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:hover:not(:disabled) { 
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(59, 130, 246, 0.3);
+      opacity: 0.95;
+    }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
     #callView {
@@ -103,6 +107,8 @@
       width: 100vw;
       flex-direction: row;
       background: var(--bg-1);
+      position: relative;
+      overflow: hidden;
     }
 
     .main-stage {
@@ -246,13 +252,17 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
+      transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    .control-btn:hover { background: rgba(255,255,255,0.2); transform: scale(1.05); }
+    .control-btn:hover:not(:disabled) { 
+      background: rgba(255,255,255,0.2); 
+      transform: scale(1.1); 
+      box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+    }
     .control-btn.active { background: var(--text); color: var(--bg-0); }
     .control-btn.danger { background: var(--danger); }
-    .control-btn.danger:hover { background: #dc2626; }
-    .control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .control-btn.danger:hover:not(:disabled) { background: #dc2626; }
+    .control-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: scale(1); box-shadow: none; }
 
     .sidebar {
       width: 360px;
@@ -260,10 +270,13 @@
       border-left: 1px solid var(--stroke);
       display: flex;
       flex-direction: column;
-      transition: width 0.3s ease;
+      transition: width 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+      overflow: hidden;
+      z-index: 100;
     }
     .sidebar.collapsed { width: 0; border: none; }
-    .sidebar.collapsed * { display: none; }
+    .sidebar-tabs, .sidebar-content { width: 360px; transition: opacity 0.3s ease; }
+    .sidebar.collapsed .sidebar-tabs, .sidebar.collapsed .sidebar-content { opacity: 0; pointer-events: none; }
 
     .sidebar-tabs {
       display: flex;
@@ -280,6 +293,16 @@
       transition: color 0.2s;
     }
     .tab-btn.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+    .close-sidebar-btn {
+      display: none;
+      flex: 0 0 60px;
+      color: white;
+      background: var(--danger);
+      border-left: 1px solid var(--stroke);
+      font-size: 1.25rem;
+      cursor: pointer;
+    }
+    .close-sidebar-btn:hover { background: #dc2626; color: white; }
 
     .sidebar-content {
       flex: 1;
@@ -298,7 +321,11 @@
       background: rgba(255,255,255,0.05);
       border-radius: var(--radius-md);
       border: 1px solid transparent;
-      transition: all 0.2s ease;
+      transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    .participant-item:hover {
+      background: rgba(255,255,255,0.1);
+      transform: translateX(4px);
     }
     .participant-item.active-speaker {
       border-color: #22c55e;
@@ -326,11 +353,13 @@
       max-width: 90%;
       word-wrap: break-word;
       font-size: 0.95rem;
+      animation: fadeIn 0.3s cubic-bezier(0.25, 1, 0.5, 1);
     }
     .chat-msg.self {
       align-self: flex-end;
       background: var(--accent);
     }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     .chat-empty { text-align: center; color: var(--muted); font-size: 0.9rem; margin: auto; }
     
     .chat-input-row {
@@ -427,6 +456,105 @@
       background-color: var(--accent);
       transition: width 0.1s linear;
     }
+
+    /* Responsive Design for all devices */
+    @media (max-width: 768px) {
+      .join-card {
+        padding: 24px;
+        width: 95%;
+      }
+      
+      .header-bar {
+        flex-wrap: wrap;
+        padding: 10px;
+        gap: 8px;
+      }
+      .room-info {
+        font-size: 0.9rem;
+      }
+      #copyLinkBtn {
+        padding: 6px 12px;
+        font-size: 0.85rem;
+      }
+      
+      .sidebar {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: -5px 0 25px rgba(0,0,0,0.5);
+      }
+      .sidebar-tabs, .sidebar-content { width: 100vw; }
+      .close-sidebar-btn { display: flex; align-items: center; justify-content: center; }
+      
+      .main-stage {
+        padding: 0;
+        gap: 0;
+      }
+      .header-bar {
+        border-radius: 0;
+        border-top: none;
+        border-left: none;
+        border-right: none;
+      }
+      .floating-controls {
+        position: relative;
+        bottom: auto;
+        left: auto;
+        transform: none;
+        width: 100%;
+        max-width: 100%;
+        padding: 12px 8px;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+        border-radius: 0;
+        border-bottom: none;
+        border-left: none;
+        border-right: none;
+        background: var(--bg-1);
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+        z-index: 90;
+      }
+      .control-btn {
+        width: 44px;
+        height: 44px;
+      }
+      .control-btn svg {
+        width: 18px;
+        height: 18px;
+      }
+      
+      #video-grid {
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        padding: 8px;
+        padding-bottom: 8px;
+        gap: 8px;
+      }
+      .video-wrapper {
+        min-height: 150px;
+      }
+      .video-wrapper.focused {
+        bottom: 0;
+        height: 100%;
+        border-radius: 0;
+      }
+    }
+    
+    @media (max-width: 400px) {
+      .floating-controls {
+        gap: 6px;
+        padding: 8px;
+      }
+      .control-btn {
+        width: 40px;
+        height: 40px;
+      }
+      .join-card h1 { font-size: 1.5rem; }
+      .join-card p { font-size: 0.85rem; }
+    }
   </style>
 </head>
 <body>
@@ -474,10 +602,11 @@
         </div>
       </div>
       
-      <aside class="sidebar" id="sidePanel">
+      <aside class="sidebar collapsed" id="sidePanel">
         <div class="sidebar-tabs">
           <button class="tab-btn active" id="tabChat">Chat</button>
           <button class="tab-btn" id="tabParticipants">Participants</button>
+          <button class="tab-btn close-sidebar-btn" id="closeSidebarBtnMobile" title="Close Sidebar"><i class="fa-solid fa-xmark"></i></button>
         </div>
         
         <div class="sidebar-content" id="chatPanel">

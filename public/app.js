@@ -1098,7 +1098,6 @@ function ensurePeerVideoWrapper(peerId, username = 'Peer') {
 }
 
 function ensurePeer(peerId, providedUsername = null) {
-  ensurePeerVideoWrapper(peerId, providedUsername || 'Anonymous');
   const existingPeer = state.peers.get(peerId);
   const finalUsername = providedUsername || (existingPeer ? existingPeer.username : 'Anonymous');
 
@@ -1106,10 +1105,13 @@ function ensurePeer(peerId, providedUsername = null) {
     existingPeer.username = finalUsername;
     const pcState = existingPeer.pc?.connectionState || existingPeer.pc?.signalingState || 'new';
     if (pcState !== 'closed' && pcState !== 'failed') {
+      ensurePeerVideoWrapper(peerId, finalUsername);
       return existingPeer;
     }
     cleanupPeer(peerId, 'recreating closed peer');
   }
+
+  ensurePeerVideoWrapper(peerId, finalUsername);
 
   if (!window.RTCPeerConnection) {
     showToast('WebRTC is unavailable in this browser.', 'error');
@@ -2466,5 +2468,12 @@ const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
 if (toggleSidebarBtn) {
   toggleSidebarBtn.addEventListener('click', () => {
     document.getElementById('sidePanel').classList.toggle('collapsed');
+  });
+}
+
+const closeSidebarBtnMobile = document.getElementById('closeSidebarBtnMobile');
+if (closeSidebarBtnMobile) {
+  closeSidebarBtnMobile.addEventListener('click', () => {
+    document.getElementById('sidePanel').classList.add('collapsed');
   });
 }

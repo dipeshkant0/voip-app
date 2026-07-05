@@ -4,7 +4,7 @@ const path = require('path');
 const indexHtmlPath = path.join(__dirname, 'public', 'index.html');
 let indexHtml = fs.readFileSync(indexHtmlPath, 'utf8');
 
-// 1. Revert CSS for .control-btn
+//  Revert CSS for .control-btn
 indexHtml = indexHtml.replace(
   /\.control-btn {\n      padding: 12px 24px;\n      border-radius: 999px;/g,
   `.control-btn {\n      width: 52px;\n      height: 52px;\n      border-radius: 50%;`
