@@ -26,7 +26,7 @@ This application features a gorgeous glass-morphism aesthetic UI and is engineer
 
 1. Clone the repository and navigate into it:
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/dipeshkant0/voip-app.git
    cd voip-app
    ```
 
