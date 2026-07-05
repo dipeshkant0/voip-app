@@ -2,10 +2,15 @@ const socket = io();
 
 const ROOM_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const runtimeConfig = window.__VOIP_APP_CONFIG__ || {};
-const DEFAULT_STUN_URLS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const DEFAULT_ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:global.stun.twilio.com:3478' }
+];
 
 function normalizeIceServers(servers) {
-  if (!Array.isArray(servers)) return DEFAULT_STUN_URLS;
+  if (!Array.isArray(servers)) return DEFAULT_ICE_SERVERS;
 
   const normalized = servers
     .map((server) => {
@@ -21,7 +26,7 @@ function normalizeIceServers(servers) {
     })
     .filter(Boolean);
 
-  return normalized.length ? normalized : DEFAULT_STUN_URLS;
+  return normalized.length ? normalized : DEFAULT_ICE_SERVERS;
 }
 
 function hasTurnRelayServer(servers) {
@@ -33,7 +38,6 @@ function hasTurnRelayServer(servers) {
 
 const rtcConfig = {
   iceServers: normalizeIceServers(runtimeConfig.iceServers),
-  iceCandidatePoolSize: 1,
 };
 
 const state = {
@@ -62,8 +66,8 @@ let mediaRecorder;
 let recordedChunks = [];
 let audioSources = new Map();
 let speakerPollId = null;
+let activeBlobUrls = [];
 
-const MAX_PENDING_ICE = 20;
 const MAX_CHAT_MESSAGES = 200;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const FILE_CHUNK_SIZE = 16 * 1024;
@@ -88,7 +92,22 @@ function mixVideos() {
       const x = (i % cols) * w;
       const y = Math.floor(i / cols) * h;
       try {
-        ctx.drawImage(vid, x, y, w, h);
+        const vidW = vid.videoWidth;
+        const vidH = vid.videoHeight;
+        if (vidW > 0 && vidH > 0) {
+          const scale = Math.max(w / vidW, h / vidH);
+          const drawW = vidW * scale;
+          const drawH = vidH * scale;
+          const drawX = x + (w - drawW) / 2;
+          const drawY = y + (h - drawH) / 2;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, y, w, h);
+          ctx.clip();
+          ctx.drawImage(vid, drawX, drawY, drawW, drawH);
+          ctx.restore();
+        }
       } catch (e) { }
     });
   }
@@ -182,9 +201,9 @@ function startRecording() {
 
   mediaRecorder.start(1000);
 
-  ui.recordBtn.textContent = 'Stop Recording';
-  ui.recordBtn.classList.add('btn-danger');
-  ui.recordBtn.classList.remove('btn-secondary');
+  ui.recordBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
+  ui.recordBtn.classList.add('danger');
+  ui.recordBtn.classList.add('active');
   showToast('Recording started.', 'info');
 }
 
@@ -205,9 +224,9 @@ function stopRecording() {
   audioSources.clear();
   state.recordingDestination = null;
 
-  ui.recordBtn.textContent = 'Record Call';
-  ui.recordBtn.classList.remove('btn-danger');
-  ui.recordBtn.classList.add('btn-secondary');
+  ui.recordBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>`;
+  ui.recordBtn.classList.remove('danger');
+  ui.recordBtn.classList.remove('active');
 }
 
 async function toggleRecording() {
@@ -299,8 +318,8 @@ function setRoomChip(value) {
 
 function setMode(mode) {
   const isCall = mode === 'call';
-  ui.roomView.style.display = isCall ? 'none' : 'grid';
-  ui.callView.style.display = isCall ? 'grid' : 'none';
+  ui.roomView.style.display = isCall ? 'none' : 'flex';
+  ui.callView.style.display = isCall ? 'flex' : 'none';
 }
 
 function setChatEnabled(enabled) {
@@ -385,7 +404,23 @@ function describePeerBadge(peer) {
 function updateMuteButton() {
   const track = currentTrack();
   ui.muteBtn.disabled = !track;
-  ui.muteBtn.textContent = track && track.enabled ? 'Mute Mic' : 'Unmute Mic';
+  const isEnabled = track && track.enabled;
+  
+  if (isEnabled) {
+    ui.muteBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+    ui.muteBtn.classList.add('active');
+    ui.muteBtn.classList.remove('danger');
+  } else {
+    ui.muteBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+    ui.muteBtn.classList.remove('active');
+    ui.muteBtn.classList.add('danger');
+  }
+  
+  const localMuteIcon = document.getElementById('mute-icon-local');
+  if (localMuteIcon) {
+    if (isEnabled) localMuteIcon.classList.add('hidden');
+    else localMuteIcon.classList.remove('hidden');
+  }
 }
 
 function updateMicWarningBadge() {
@@ -396,13 +431,13 @@ function updateMicWarningBadge() {
 
 function updateRetryButton() {
   if (!state.roomId) {
-    ui.retryMicBtn.textContent = 'Retry Mic Access';
+    ui.retryMicBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
     ui.retryMicBtn.disabled = true;
     return;
   }
 
   ui.retryMicBtn.disabled = false;
-  ui.retryMicBtn.textContent = currentTrack() ? 'Refresh Mic' : 'Retry Mic Access';
+  ui.retryMicBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
 }
 
 function setChatStateFromPeers() {
@@ -411,7 +446,7 @@ function setChatStateFromPeers() {
   ui.attachFileBtn.disabled = !state.roomId || !hasOpenDataChannel;
 }
 
-function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass) {
+function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass, peerId = 'local') {
   const item = document.createElement('div');
   item.className = 'participant-item';
   const meta = document.createElement('div');
@@ -428,6 +463,12 @@ function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass) {
   badgeEl.className = 'participant-badge ' + badgeClass;
   badgeEl.textContent = badgeLabel;
   item.appendChild(meta);
+  
+  const micEl = document.createElement('div');
+  micEl.className = 'mic-icon';
+  micEl.id = `participant-mic-${peerId}`;
+  micEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+  item.appendChild(micEl);
   item.appendChild(badgeEl);
   return item;
 }
@@ -437,7 +478,7 @@ function renderParticipants() {
   ui.participantList.innerHTML = '';
 
   const hasMic = Boolean(currentTrack());
-  const youItem = buildParticipantItem(state.username || 'You', hasMic ? 'Microphone active' : 'Microphone unavailable', hasMic ? 'Ready' : 'No Mic', hasMic ? 'audio' : 'connecting');
+  const youItem = buildParticipantItem(state.username || 'You', hasMic ? 'Microphone active' : 'Microphone unavailable', hasMic ? 'Ready' : 'No Mic', hasMic ? 'audio' : 'connecting', 'local');
   youItem.id = `participant-local`;
   ui.participantList.appendChild(youItem);
 
@@ -461,7 +502,7 @@ function renderParticipants() {
     const peer = state.peers.get(peerId);
     const badge = describePeerBadge(peer);
 
-    const item = buildParticipantItem(peer.username || 'Anonymous', describePeerConnection(peer), badge.label, badge.className);
+    const item = buildParticipantItem(peer.username || 'Anonymous', describePeerConnection(peer), badge.label, badge.className, peerId);
     item.id = `participant-${peerId}`;
     ui.participantList.appendChild(item);
   });
@@ -562,11 +603,12 @@ function pollActiveSpeakers() {
 }
 
 function getAudioConstraints(deviceId = '', exactDevice = false) {
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   return {
     deviceId: deviceId ? { [exactDevice ? 'exact' : 'ideal']: deviceId } : undefined,
-    echoCancellation: { ideal: true },
-    noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
+    echoCancellation: true,
+    noiseSuppression: isMobile ? false : true,
+    autoGainControl: isMobile ? false : true,
     sampleRate: { ideal: 48000 },
     channelCount: { ideal: 1 },
   };
@@ -593,24 +635,53 @@ function rebuildLocalStream(audioTrack = currentTrack(), videoTrack = state.vide
 function updateLocalVideoPreview() {
   const videoTrack = state.screenSharing ? state.localVideoTrack : (state.videoEnabled ? currentVideoTrack() : null);
   let localVideoEl = document.getElementById('video-local');
+  let wrapper = document.getElementById('video-wrapper-local');
 
-  if (!videoTrack) {
-    if (localVideoEl) {
-      localVideoEl.srcObject = null;
-      localVideoEl.remove();
-    }
-    return;
-  }
-
-  if (!localVideoEl) {
+  if (!wrapper) {
+    wrapper = document.createElement('div');
+    wrapper.className = 'video-wrapper';
+    wrapper.id = 'video-wrapper-local';
+    
     localVideoEl = document.createElement('video');
     localVideoEl.id = 'video-local';
     localVideoEl.autoplay = true;
     localVideoEl.playsInline = true;
     localVideoEl.muted = true;
-    ui.videoContainer.appendChild(localVideoEl);
+    
+    const muteIcon = document.createElement('div');
+    muteIcon.className = 'video-mute-icon hidden';
+    muteIcon.id = 'mute-icon-local';
+    muteIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path></svg>`;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar-placeholder';
+    avatar.textContent = state.username || 'You';
+    avatar.style.position = 'absolute';
+    avatar.style.color = 'white';
+    avatar.style.fontSize = '2rem';
+    
+    const nametag = document.createElement('div');
+    nametag.className = 'video-nametag';
+    nametag.textContent = state.username || 'You (Local)';
+
+    wrapper.appendChild(localVideoEl);
+    wrapper.appendChild(muteIcon);
+    wrapper.appendChild(avatar);
+    wrapper.appendChild(nametag);
+    ui.videoContainer.appendChild(wrapper);
   }
 
+  const avatarPlaceholder = wrapper.querySelector('.avatar-placeholder');
+
+  if (!videoTrack) {
+    localVideoEl.srcObject = null;
+    localVideoEl.style.display = 'none';
+    if (avatarPlaceholder) avatarPlaceholder.style.display = 'block';
+    return;
+  }
+
+  localVideoEl.style.display = 'block';
+  if (avatarPlaceholder) avatarPlaceholder.style.display = 'none';
   localVideoEl.srcObject = new MediaStream([videoTrack]);
   localVideoEl.play().catch(e => console.warn('Local video auto-play prevented:', e));
 }
@@ -655,6 +726,8 @@ function ensureChatEmptyState() {
 function clearChat() {
   ui.chatBox.innerHTML = '';
   ensureChatEmptyState();
+  activeBlobUrls.forEach(url => URL.revokeObjectURL(url));
+  activeBlobUrls = [];
 }
 
 function appendMessage(text, isSelf, senderName = '') {
@@ -823,16 +896,47 @@ function attachDataChannel(peerId, channel) {
           const fileName = String(msg.name || 'received-file').slice(0, 120);
           const fileSize = Number(msg.size);
           const fileType = String(msg.fileType || 'application/octet-stream').slice(0, 120);
+          const fileId = msg.fileId || ('file-' + Math.random().toString(36).substr(2, 9));
           if (!Number.isFinite(fileSize) || fileSize < 0 || fileSize > MAX_FILE_SIZE) {
             showToast('Incoming file was rejected because its metadata is invalid.', 'warning');
             return;
           }
           state.incomingFiles.set(peerId, {
+            fileId,
             metadata: { name: fileName, size: fileSize, fileType },
             chunks: [],
             receivedSize: 0
           });
+          appendFileProgress(fileId, fileName, fileSize, false, peer.username || 'Anonymous');
           showToast(`Receiving file: ${fileName}...`, 'info');
+        }
+        else if (msg.type === 'audio-state') {
+          const muteIcon = document.getElementById(`mute-icon-${peerId}`);
+          if (muteIcon) {
+            if (msg.enabled) muteIcon.classList.add('hidden');
+            else muteIcon.classList.remove('hidden');
+          }
+          const participantMic = document.getElementById(`participant-mic-${peerId}`);
+          if (participantMic) {
+            if (msg.enabled) {
+              participantMic.classList.remove('muted');
+              participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+            } else {
+              participantMic.classList.add('muted');
+              participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+            }
+          }
+        }
+        else if (msg.type === 'typing') {
+          const typingIndicator = document.getElementById('typingIndicator');
+          if (typingIndicator) {
+            typingIndicator.textContent = `${peer.username || 'Someone'} is typing...`;
+            typingIndicator.style.display = 'block';
+            clearTimeout(peer.typingTimeout);
+            peer.typingTimeout = setTimeout(() => {
+              typingIndicator.style.display = 'none';
+            }, 3000);
+          }
         }
         else if (msg.type === 'video-state'){
           const videoEl = document.getElementById(`video-${peerId}`);
@@ -850,7 +954,11 @@ function attachDataChannel(peerId, channel) {
 
       fileState.chunks.push(event.data);
       fileState.receivedSize += event.data.byteLength;
+      
+      updateFileProgress(fileState.fileId, fileState.receivedSize, fileState.metadata.size);
+
       if (fileState.receivedSize > MAX_FILE_SIZE || fileState.receivedSize > fileState.metadata.size + FILE_CHUNK_SIZE) {
+        removeFileProgress(fileState.fileId);
         state.incomingFiles.delete(peerId);
         showToast('Incoming file was cancelled because it exceeded its declared size.', 'warning');
         return;
@@ -859,6 +967,8 @@ function attachDataChannel(peerId, channel) {
       if (fileState.receivedSize >= fileState.metadata.size) {
         const blob = new Blob(fileState.chunks, { type: fileState.metadata.fileType });
         const url = URL.createObjectURL(blob);
+        activeBlobUrls.push(url);
+        removeFileProgress(fileState.fileId);
         appendFileMessage(fileState.metadata.name, url, fileState.metadata.size, false, peer.username || 'Anonymous');
         state.incomingFiles.delete(peerId);
         showToast(`File received: ${fileState.metadata.name}`, 'success');
@@ -867,7 +977,54 @@ function attachDataChannel(peerId, channel) {
   };
 }
 
+function queueSignalingTask(peerId, task) {
+  const peer = state.peers.get(peerId);
+  if (!peer) return;
+
+  peer.signalingQueue = peer.signalingQueue.then(task).catch(error => {
+    console.error(`Signaling task failed for peer ${peerId}:`, error);
+  });
+}
+
+
+function ensurePeerVideoWrapper(peerId, username = 'Peer') {
+  let wrapper = document.getElementById(`video-wrapper-${peerId}`);
+  if (!wrapper) {
+    wrapper = document.createElement('div');
+    wrapper.className = 'video-wrapper';
+    wrapper.id = `video-wrapper-${peerId}`;
+    
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar-placeholder';
+    avatar.textContent = username;
+    avatar.style.position = 'absolute';
+    avatar.style.color = 'white';
+    avatar.style.fontSize = '2rem';
+    
+    const muteIcon = document.createElement('div');
+    muteIcon.className = 'video-mute-icon hidden';
+    muteIcon.id = `mute-icon-${peerId}`;
+    muteIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>';
+    muteIcon.style.color = 'var(--danger)';
+    muteIcon.style.fontWeight = 'bold';
+    muteIcon.style.background = 'rgba(0,0,0,0.6)';
+    muteIcon.style.padding = '4px';
+    muteIcon.style.borderRadius = '50%';
+
+    const nametag = document.createElement('div');
+    nametag.className = 'video-nametag';
+    nametag.id = `nametag-${peerId}`;
+    nametag.textContent = username;
+
+    wrapper.appendChild(avatar);
+    wrapper.appendChild(muteIcon);
+    wrapper.appendChild(nametag);
+    ui.videoContainer.appendChild(wrapper);
+  }
+}
+
 function ensurePeer(peerId, providedUsername = null) {
+  ensurePeerVideoWrapper(peerId, providedUsername || 'Anonymous');
   const existingPeer = state.peers.get(peerId);
   const finalUsername = providedUsername || (existingPeer ? existingPeer.username : 'Anonymous');
 
@@ -894,23 +1051,24 @@ function ensurePeer(peerId, providedUsername = null) {
     polite: !initiator,
     makingOffer: false,
     ignoreOffer: false,
-    pendingIce: [],
+    signalingQueue: Promise.resolve(),
+    iceQueue: [],
   };
 
   state.peers.set(peerId, peer);
   renderParticipants();
 
   const pc = peer.pc;
-  const localTrack = currentTrack();
-  if (localTrack && state.localStream) {
-    pc.addTrack(localTrack, state.localStream);
-  }
+  // const localTrack = currentTrack();
+  // if (localTrack && state.localStream) {
+  //   pc.addTrack(localTrack, state.localStream);
+  // }
 
   pc.onicecandidate = (event) => {
     if (!event.candidate || !state.roomId) return;
     socket.emit('ice-candidate', {
       target: peerId,
-      candidate: event.candidate,
+      candidate: typeof event.candidate.toJSON === 'function' ? event.candidate.toJSON() : event.candidate,
     });
   };
 
@@ -920,12 +1078,15 @@ function ensurePeer(peerId, providedUsername = null) {
     if (isVideo) {
       let videoEl = document.getElementById(`video-${peerId}`);
       if (!videoEl) {
+        const wrapper = document.getElementById(`video-wrapper-${peerId}`);
         videoEl = document.createElement('video');
         videoEl.id = `video-${peerId}`;
         videoEl.autoplay = true;
         videoEl.playsInline = true;
         videoEl.style.transition = 'opacity 0.2s ease';
-        ui.videoContainer.appendChild(videoEl);
+        wrapper.appendChild(videoEl);
+        const avatar = wrapper.querySelector('.avatar-placeholder');
+        if (avatar) avatar.style.display = 'none';
       }
       videoEl.srcObject = new MediaStream([event.track]);
       videoEl.play().catch(e => console.warn('Video auto-play prevented:', e));
@@ -945,7 +1106,9 @@ function ensurePeer(peerId, providedUsername = null) {
         audioEl.autoplay = true;
         audioEl.playsInline = true;
         audioEl.style.display = 'none';
-        ui.videoContainer.appendChild(audioEl);
+        const wrapper = document.getElementById(`video-wrapper-${peerId}`);
+        if (wrapper) wrapper.appendChild(audioEl);
+        else ui.videoContainer.appendChild(audioEl);
       }
       const safeAudioStream = new MediaStream([event.track]);
       audioEl.srcObject = safeAudioStream;
@@ -978,31 +1141,39 @@ function ensurePeer(peerId, providedUsername = null) {
         if (current && current.pc === pc && pc.connectionState === 'disconnected') {
           cleanupPeer(peerId, 'disconnected timeout');
         }
-      }, 3000);
+      }, 15000);
     }
 
     refreshRoomStatus();
   };
 
-  pc.onnegotiationneeded = async () => {
-    if (!state.roomId) return;
-
-    const currentPeer = state.peers.get(peerId);
-    if (!currentPeer || currentPeer.makingOffer || pc.signalingState !== 'stable') return;
-
-    try {
-      currentPeer.makingOffer = true;
-      await pc.setLocalDescription(await pc.createOffer());
-      socket.emit('webrtc-offer', {
-        target: peerId,
-        sdp: pc.localDescription,
-      });
-    } catch (error) {
-      console.error('Negotiation failed:', error);
-      showToast('Negotiation failed for a peer connection.', 'error');
-    } finally {
-      currentPeer.makingOffer = false;
+  pc.oniceconnectionstatechange = () => {
+    if (pc.iceConnectionState === 'failed') {
+      cleanupPeer(peerId, 'ICE network blocked');
     }
+  };
+
+  pc.onnegotiationneeded = () => {
+    queueSignalingTask(peerId, async () => {
+      if (!state.roomId) return;
+
+      const currentPeer = state.peers.get(peerId);
+      if (!currentPeer) return;
+
+      try {
+        currentPeer.makingOffer = true;
+        await pc.setLocalDescription();
+        socket.emit('webrtc-offer', {
+          target: peerId,
+          sdp: pc.localDescription,
+        });
+      } catch (error) {
+        console.error('Negotiation failed:', error);
+        showToast('Negotiation failed for a peer connection.', 'error');
+      } finally {
+        currentPeer.makingOffer = false;
+      }
+    });
   };
 
   if (initiator) {
@@ -1065,18 +1236,7 @@ function applyLocalTracksToAllPeers() {
   peerEntries().forEach(([peerId]) => applyLocalTracksToPeer(peerId));
 }
 
-function flushPeerIce(peerId) {
-  const peer = getPeerState(peerId);
-  if (!peer || !peer.pc.remoteDescription || peer.pendingIce.length === 0) return;
 
-  const candidates = [...peer.pendingIce];
-  peer.pendingIce = [];
-  candidates.forEach((candidate) => {
-    peer.pc.addIceCandidate(candidate).catch((error) => {
-      console.error('Failed to add ICE candidate:', error);
-    });
-  });
-}
 
 function cleanupPeer(peerId, reason = '', skipRefresh = false) {
   const peer = getPeerState(peerId);
@@ -1090,7 +1250,7 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
     } catch (_error) { }
   }
 
-  peer.pendingIce = [];
+  peer.signalingQueue = Promise.resolve();
 
   if (peer.pc) {
     try {
@@ -1116,10 +1276,17 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
     audioEl.remove();
   }
 
-  const videoEl = document.getElementById(`video-${peerId}`);
-  if (videoEl) {
-    videoEl.srcObject = null;
-    videoEl.remove();
+  const videoWrapper = document.getElementById(`video-wrapper-${peerId}`);
+  if (videoWrapper) {
+    const vEl = document.getElementById(`video-${peerId}`);
+    if (vEl) vEl.srcObject = null;
+    videoWrapper.remove();
+  } else {
+    const videoEl = document.getElementById(`video-${peerId}`);
+    if (videoEl) {
+      videoEl.srcObject = null;
+      videoEl.remove();
+    }
   }
 
   if (audioSources.has(peerId)) {
@@ -1170,13 +1337,14 @@ function leaveRoom(options = {}) {
   state.roomId = '';
   state.selectedDeviceId = '';
   state.videoEnabled = false;
-  ui.videoBtn.textContent = 'Turn on Video';
+  ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; ui.videoBtn.classList.remove('active');
   setMode('join');
   setRoomChip('Not joined');
   setChatEnabled(false);
   clearChat();
   renderParticipants();
-  ui.muteBtn.textContent = 'Mute Mic';
+  ui.muteBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+  ui.muteBtn.classList.remove('active', 'danger');
   ui.muteBtn.disabled = true;
   ui.videoBtn.disabled = true;
   ui.screenShareBtn.disabled = true;
@@ -1190,13 +1358,16 @@ function leaveRoom(options = {}) {
     ui.roomInput.value = '';
   }
 
-  window.location.href = window.location.pathname;
-  window.setTimeout(() => {
-    state.leaving = false;
-  }, 150);
+  setTimeout(() => { state.leaving = false; }, 150);
 }
 
-async function acquireMicrophone(deviceId = '', options = {}) {
+let isAcquiringMedia = false;
+
+async function acquireMicrophone(deviceId = '', options = {}, isRetry = false) {
+  if (!isRetry) {
+    if (isAcquiringMedia) return false;
+    isAcquiringMedia = true;
+  }
   const { silent = false, required = false, exactDevice = false, allowFallback = true } = options;
   if (!navigator.mediaDevices?.getUserMedia) {
     if (!silent) {
@@ -1243,7 +1414,7 @@ async function acquireMicrophone(deviceId = '', options = {}) {
       if (!silent) {
         showToast('Selected microphone is unavailable. Trying the default device.', 'warning');
       }
-      return acquireMicrophone('', { silent, required, exactDevice: false, allowFallback: false });
+      return acquireMicrophone('', { silent, required, exactDevice: false, allowFallback: false }, true);
     }
 
     console.warn('Microphone access failed:', error);
@@ -1258,6 +1429,8 @@ async function acquireMicrophone(deviceId = '', options = {}) {
     await populateDevices(state.selectedDeviceId);
     refreshMicUi();
     return false;
+  } finally {
+    if (!isRetry) isAcquiringMedia = false;
   }
 }
 
@@ -1273,43 +1446,62 @@ async function populateDevices(selectedDeviceId = state.selectedDeviceId) {
     return;
   }
 
-  let devices = [];
   try {
-    devices = await navigator.mediaDevices.enumerateDevices();
-  } catch (error) {
-    console.warn('Microphone discovery failed:', error);
-    ui.deviceSelect.innerHTML = '<option value="">Microphone discovery unavailable</option>';
-    ui.deviceSelect.disabled = true;
-    return;
-  }
-  const inputs = devices.filter((device) => device.kind === 'audioinput');
-  const keepValue = selectedDeviceId || ui.deviceSelect.value;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioDevices = devices.filter((d) => d.kind === 'audioinput');
+    const videoDevices = devices.filter((d) => d.kind === 'videoinput');
 
-  ui.deviceSelect.innerHTML = '';
+    ui.deviceSelect.innerHTML = '';
+    
+    if (!audioDevices.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No microphones found';
+      ui.deviceSelect.appendChild(option);
+      ui.deviceSelect.disabled = true;
+    } else {
+      ui.deviceSelect.disabled = false;
+      const defaultOpt = document.createElement('option');
+      defaultOpt.value = '';
+      defaultOpt.textContent = 'Default Microphone';
+      ui.deviceSelect.appendChild(defaultOpt);
 
-  if (!inputs.length) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'No microphones found';
-    ui.deviceSelect.appendChild(option);
-    ui.deviceSelect.disabled = true;
-    return;
-  }
+      audioDevices.forEach(device => {
+        if (device.deviceId === 'default' || device.deviceId === 'communications') return;
+        const opt = document.createElement('option');
+        opt.value = device.deviceId;
+        opt.textContent = device.label || `Microphone ${ui.deviceSelect.options.length}`;
+        ui.deviceSelect.appendChild(opt);
+      });
+      
+      const keepValue = ui.deviceSelect.querySelector(`option[value="${selectedDeviceId}"]`) ? selectedDeviceId : '';
+      ui.deviceSelect.value = keepValue;
 
-  ui.deviceSelect.disabled = false;
-
-  inputs.forEach((device, index) => {
-    const option = document.createElement('option');
-    option.value = device.deviceId;
-    option.textContent = device.label || `Microphone ${index + 1}`;
-    if (device.deviceId === keepValue) {
-      option.selected = true;
+      const midCallDeviceSelect = document.getElementById('midCallDeviceSelect');
+      if (midCallDeviceSelect) {
+        midCallDeviceSelect.innerHTML = ui.deviceSelect.innerHTML;
+        midCallDeviceSelect.value = keepValue;
+      }
     }
-    ui.deviceSelect.appendChild(option);
-  });
 
-  if (!ui.deviceSelect.value) {
-    ui.deviceSelect.selectedIndex = 0;
+    const midCallCameraSelect = document.getElementById('midCallCameraSelect');
+    if (midCallCameraSelect) {
+      midCallCameraSelect.innerHTML = '';
+      const defCamOpt = document.createElement('option');
+      defCamOpt.value = '';
+      defCamOpt.textContent = 'Default Camera';
+      midCallCameraSelect.appendChild(defCamOpt);
+      
+      videoDevices.forEach(device => {
+        const opt = document.createElement('option');
+        opt.value = device.deviceId;
+        opt.textContent = device.label || `Camera ${midCallCameraSelect.options.length}`;
+        midCallCameraSelect.appendChild(opt);
+      });
+      if (state.selectedCameraId) midCallCameraSelect.value = state.selectedCameraId;
+    }
+  } catch (error) {
+    console.warn('Failed to enumerate devices:', error);
   }
 }
 
@@ -1412,7 +1604,7 @@ async function restoreRoomAfterReconnect() {
     await waitForSocketConnect();
     const result = await requestRoomJoin({ roomId: state.roomId, username: state.username, password: ui.passwordInput.value });
 
-    syncPeerRoster(result.roomPeers || result.peers || []);
+    syncPeerRoster(result.roomPeers || result.peers || [], result.usernames || {});
     applyLocalTracksToAllPeers();
     refreshRoomStatus();
     showToast('Room restored after reconnect.', 'success');
@@ -1431,68 +1623,89 @@ async function handleRemoteOffer(data) {
   const peer = ensurePeer(data.sender);
   if (!peer) return;
 
-  const pc = peer.pc;
-  const description = new RTCSessionDescription(data.sdp);
-  const offerCollision = description.type === 'offer' && (peer.makingOffer || pc.signalingState !== 'stable');
-  peer.ignoreOffer = !peer.polite && offerCollision;
+  queueSignalingTask(data.sender, async () => {
+    const currentPeer = state.peers.get(data.sender);
+    if (!currentPeer) return;
+    const pc = currentPeer.pc;
+    const description = new RTCSessionDescription(data.sdp);
+    const offerCollision = description.type === 'offer' && (currentPeer.makingOffer || pc.signalingState !== 'stable');
+    currentPeer.ignoreOffer = !currentPeer.polite && offerCollision;
 
-  if (peer.ignoreOffer) return;
+    if (currentPeer.ignoreOffer) return;
 
-  try {
-    if (offerCollision) {
-      await pc.setLocalDescription({ type: 'rollback' });
+    try {
+      if (offerCollision) {
+        await pc.setLocalDescription({ type: 'rollback' });
+      }
+
+      await pc.setRemoteDescription(description);
+
+      while (currentPeer.iceQueue.length > 0) {
+        const candidate = currentPeer.iceQueue.shift();
+        await pc.addIceCandidate(candidate).catch(e => console.warn(e));
+      }
+
+      if (description.type === 'offer') {
+        await pc.setLocalDescription();
+        socket.emit('webrtc-answer', {
+          target: data.sender,
+          sdp: pc.localDescription,
+        });
+      }
+
+      refreshRoomStatus();
+    } catch (error) {
+      console.error('Failed to handle offer:', error);
+      showToast('Failed to process a signaling offer.', 'error');
+      cleanupPeer(data.sender, 'offer handling failed');
     }
-
-    await pc.setRemoteDescription(description);
-    flushPeerIce(data.sender);
-
-    if (description.type === 'offer') {
-      await pc.setLocalDescription(await pc.createAnswer());
-      socket.emit('webrtc-answer', {
-        target: data.sender,
-        sdp: pc.localDescription,
-      });
-    }
-
-    refreshRoomStatus();
-  } catch (error) {
-    console.error('Failed to handle offer:', error);
-    showToast('Failed to process a signaling offer.', 'error');
-    cleanupPeer(data.sender, 'offer handling failed');
-  }
+  });
 }
 
 function handleRemoteAnswer(data) {
   if (!data?.sender || !data?.sdp) return;
-  const peer = getPeerState(data.sender);
-  if (!peer) return;
+  
+  queueSignalingTask(data.sender, async () => {
+    const peer = state.peers.get(data.sender);
+    if (!peer) return;
 
-  peer.pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
-    .then(() => flushPeerIce(data.sender))
-    .then(() => refreshRoomStatus())
-    .catch((error) => {
+    try {
+      await peer.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+      while (peer.iceQueue.length > 0) {
+        const candidate = peer.iceQueue.shift();
+        await peer.pc.addIceCandidate(candidate).catch(e => console.warn(e));
+      }
+
+      refreshRoomStatus();
+    } catch (error) {
       console.error('Failed to handle answer:', error);
       showToast('Failed to process a signaling answer.', 'error');
       cleanupPeer(data.sender, 'answer handling failed');
-    });
+    }
+  });
 }
 
 function handleRemoteIce(data) {
   if (!data?.sender || !data?.candidate) return;
-  const peer = getPeerState(data.sender);
-  if (!peer) return;
 
-  const candidate = new RTCIceCandidate(data.candidate);
-  if (peer.pc.remoteDescription) {
-    peer.pc.addIceCandidate(candidate).catch((error) => {
-      console.error('Failed to add ICE candidate:', error);
-    });
-    return;
-  }
+  queueSignalingTask(data.sender, async () => {
+    const peer = state.peers.get(data.sender);
+    if (!peer) return;
 
-  if (peer.pendingIce.length < MAX_PENDING_ICE) {
-    peer.pendingIce.push(candidate);
-  }
+    try {
+      const candidate = new RTCIceCandidate(data.candidate);
+      if (!peer.pc.remoteDescription) {
+        peer.iceQueue.push(candidate);
+      } else {
+        await peer.pc.addIceCandidate(candidate);
+      }
+    } catch (error) {
+      if (!peer.ignoreOffer) {
+        console.error('Failed to add ICE candidate:', error);
+      }
+    }
+  });
 }
 
 function broadcastVideoState(enabled) {
@@ -1539,6 +1752,69 @@ function sendChatMessage() {
   ui.chatInput.value = '';
 }
 
+function appendFileProgress(fileId, name, size, isSelf, senderName = '') {
+  const placeholder = ui.chatBox.querySelector('.chat-empty');
+  if (placeholder) placeholder.remove();
+
+  while (ui.chatBox.children.length >= MAX_CHAT_MESSAGES) {
+    ui.chatBox.firstElementChild.remove();
+  }
+
+  const el = document.createElement('div');
+  el.id = `progress-${fileId}`;
+  el.className = `chat-msg${isSelf ? ' self' : ''}`;
+
+  if (senderName) {
+    const nameEl = document.createElement('div');
+    nameEl.style.fontSize = '0.75rem';
+    nameEl.style.color = 'var(--muted)';
+    nameEl.style.marginBottom = '2px';
+    nameEl.textContent = senderName;
+    el.appendChild(nameEl);
+  }
+
+  const fileInfo = document.createElement('div');
+  fileInfo.textContent = `⏳ ${name} (${(size / 1024).toFixed(1)} KB)`;
+  fileInfo.style.fontSize = '0.9rem';
+  fileInfo.style.marginBottom = '4px'; fileInfo.style.color = isSelf ? 'white' : 'inherit';
+  el.appendChild(fileInfo);
+
+  const progressContainer = document.createElement('div');
+  progressContainer.style.width = '100%';
+  progressContainer.style.height = '6px';
+  progressContainer.style.backgroundColor = isSelf ? 'rgba(255,255,255,0.3)' : 'var(--border)';
+  progressContainer.style.borderRadius = '3px';
+  progressContainer.style.overflow = 'hidden';
+  
+  const progressBar = document.createElement('div');
+  progressBar.className = 'progress-bar-fill';
+  progressBar.style.width = '0%';
+  progressBar.style.height = '100%';
+  progressBar.style.backgroundColor = isSelf ? 'white' : 'var(--accent)';
+  progressBar.style.transition = 'width 0.1s linear';
+  
+  progressContainer.appendChild(progressBar);
+  el.appendChild(progressContainer);
+
+  ui.chatBox.appendChild(el);
+  ui.chatBox.scrollTop = ui.chatBox.scrollHeight;
+}
+
+function updateFileProgress(fileId, transferredSize, totalSize) {
+  const el = document.getElementById(`progress-${fileId}`);
+  if (!el) return;
+  const progressBar = el.querySelector('.progress-bar-fill');
+  if (progressBar) {
+    const percent = Math.min(100, Math.round((transferredSize / totalSize) * 100));
+    progressBar.style.width = `${percent}%`;
+  }
+}
+
+function removeFileProgress(fileId) {
+  const el = document.getElementById(`progress-${fileId}`);
+  if (el) el.remove();
+}
+
 function appendFileMessage(name, url, size, isSelf, senderName = '') {
   const placeholder = ui.chatBox.querySelector('.chat-empty');
   if (placeholder) placeholder.remove();
@@ -1562,8 +1838,9 @@ function appendFileMessage(name, url, size, isSelf, senderName = '') {
   const fileLink = document.createElement('a');
   fileLink.href = url;
   fileLink.download = name;
+  fileLink.rel = 'noopener noreferrer';
   fileLink.textContent = `📎 ${name} (${(size / 1024).toFixed(1)} KB)`;
-  fileLink.style.color = 'var(--accent)';
+  fileLink.style.color = isSelf ? 'white' : 'var(--accent)'; fileLink.style.textDecoration = 'underline';
   fileLink.style.textDecoration = 'none';
   el.appendChild(fileLink);
 
@@ -1571,11 +1848,57 @@ function appendFileMessage(name, url, size, isSelf, senderName = '') {
   ui.chatBox.scrollTop = ui.chatBox.scrollHeight;
 }
 
+// Utility function to natively mirror a video track
+function mirrorVideoTrack(track) {
+  const videoEl = document.createElement('video');
+  videoEl.srcObject = new MediaStream([track]);
+  videoEl.autoplay = true;
+  videoEl.playsInline = true;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  
+  videoEl.onloadedmetadata = () => {
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
+    videoEl.play().catch(() => {});
+  };
+
+  let animationId;
+  function drawFrame() {
+    if (videoEl.readyState >= 2 && canvas.width > 0) {
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoEl, -canvas.width, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
+    animationId = requestAnimationFrame(drawFrame);
+  }
+  animationId = requestAnimationFrame(drawFrame);
+
+  const canvasStream = canvas.captureStream(30);
+  const mirroredTrack = canvasStream.getVideoTracks()[0];
+
+  const originalStop = mirroredTrack.stop.bind(mirroredTrack);
+  mirroredTrack.stop = () => {
+    cancelAnimationFrame(animationId);
+    track.stop();
+    originalStop();
+  };
+
+  return mirroredTrack;
+}
+
+let isTogglingVideo = false;
+
 async function toggleVideo() {
   if (state.screenSharing) {
     showToast('Cannot enable video while screen sharing is active.', 'warning');
     return;
   }
+  
+  if (isTogglingVideo) return;
+  isTogglingVideo = true;
 
   const nextVideoEnabled = !state.videoEnabled;
   ui.videoBtn.disabled = true;
@@ -1586,7 +1909,8 @@ async function toggleVideo() {
         audio: false,
         video: getVideoConstraints(),
       });
-      const videoTrack = cameraStream.getVideoTracks()[0] || null;
+      let videoTrack = cameraStream.getVideoTracks()[0] || null;
+      if (videoTrack) videoTrack = mirrorVideoTrack(videoTrack);
       if (!videoTrack || videoTrack.readyState !== 'live') {
         stopStream(cameraStream);
         throw new Error('No live camera track was returned.');
@@ -1605,13 +1929,13 @@ async function toggleVideo() {
           rebuildLocalStream(currentTrack(), null);
           updateLocalVideoPreview();
           applyLocalTracksToAllPeers();
-          ui.videoBtn.textContent = 'Turn on Video';
+          ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; ui.videoBtn.classList.remove('active');
           showToast('Camera stopped.', 'info');
         }
       };
 
       updateLocalVideoPreview();
-      ui.videoBtn.textContent = 'Turn off Video';
+      ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`; ui.videoBtn.classList.add('active');
       showToast('Camera turned on.', 'success');
       broadcastVideoState(true);
     } else {
@@ -1620,7 +1944,7 @@ async function toggleVideo() {
       rebuildLocalStream(currentTrack(), null);
       if (previousVideoTrack) previousVideoTrack.stop();
       updateLocalVideoPreview();
-      ui.videoBtn.textContent = 'Turn on Video';
+      ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; ui.videoBtn.classList.remove('active');
       showToast('Camera turned off.', 'info');
       broadcastVideoState(false);
     }
@@ -1630,15 +1954,20 @@ async function toggleVideo() {
   } catch (error) {
     console.error('Camera toggle failed:', error);
     state.videoEnabled = !nextVideoEnabled;
-    ui.videoBtn.textContent = state.videoEnabled ? 'Turn off Video' : 'Turn on Video';
+    ui.videoBtn.innerHTML = state.videoEnabled ? '<i class="fa-solid fa-video"></i>' : '<i class="fa-solid fa-video-slash"></i>'; if(state.videoEnabled) ui.videoBtn.classList.add('active'); else ui.videoBtn.classList.remove('active');
     showToast('Camera access failed. Check browser permissions or another app using the camera.', 'error');
   } finally {
+    isTogglingVideo = false;
     ui.videoBtn.disabled = false;
   }
 }
 
 async function toggleScreenShare() {
   if (!state.screenSharing) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      showToast('Screen sharing is not supported on this device/browser.', 'error');
+      return;
+    }
     try {
       const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       state.screenSharing = true;
@@ -1648,9 +1977,9 @@ async function toggleScreenShare() {
         stopScreenShare();
       };
 
-      ui.screenShareBtn.textContent = 'Stop Screen Share';
-      ui.screenShareBtn.classList.add('btn-danger');
-      ui.screenShareBtn.classList.remove('btn-secondary');
+      ui.screenShareBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2m4 0h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2"></path><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+      ui.screenShareBtn.classList.add('danger'); ui.screenShareBtn.classList.add('active');
+      
       ui.videoBtn.disabled = true;
 
       updateLocalVideoPreview();
@@ -1673,7 +2002,7 @@ function stopScreenShare() {
     state.localVideoTrack = null;
   }
 
-  ui.screenShareBtn.textContent = 'Share Screen';
+  ui.screenShareBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>`; ui.screenShareBtn.classList.remove('active');
   ui.screenShareBtn.classList.remove('btn-danger');
   ui.screenShareBtn.classList.add('btn-secondary');
   ui.videoBtn.disabled = false;
@@ -1691,6 +2020,13 @@ function toggleMute() {
   updateMuteButton();
   refreshRoomStatus();
   showToast(track.enabled ? 'Microphone unmuted.' : 'Microphone muted.', 'info', 1800);
+  
+  const msgStr = JSON.stringify({ type: 'audio-state', enabled: track.enabled });
+  peerEntries().forEach(([, peer]) => {
+    if (peer.dataChannel?.readyState === 'open') {
+      try { peer.dataChannel.send(msgStr); } catch (e) {}
+    }
+  });
 }
 
 async function retryMicAccess() {
@@ -1823,6 +2159,10 @@ ui.fileInput.addEventListener('change', () => {
     showToast('File size must be less than 50MB.', 'warning');
     return;
   }
+  if (file.size === 0) {
+    showToast('Cannot send empty files.', 'warning');
+    return;
+  }
 
   const openChannels = peerEntries()
     .map(([, peer]) => peer.dataChannel)
@@ -1833,7 +2173,8 @@ ui.fileInput.addEventListener('change', () => {
     return;
   }
 
-  const meta = { type: 'file-meta', name: file.name.slice(0, 120), size: file.size, fileType: file.type || 'application/octet-stream' };
+  const fileId = 'file-' + Math.random().toString(36).substr(2, 9);
+  const meta = { type: 'file-meta', fileId, name: file.name.slice(0, 120), size: file.size, fileType: file.type || 'application/octet-stream' };
   openChannels.forEach((channel) => {
     try {
       channel.send(JSON.stringify(meta));
@@ -1842,6 +2183,7 @@ ui.fileInput.addEventListener('change', () => {
     }
   });
 
+  appendFileProgress(fileId, file.name, file.size, true, state.username || 'You');
   let offset = 0;
 
   const reader = new FileReader();
@@ -1853,10 +2195,14 @@ ui.fileInput.addEventListener('change', () => {
       }
     });
     offset += chunk.byteLength;
+    updateFileProgress(fileId, offset, file.size);
+    
     if (offset < file.size) {
       readSlice(offset);
     } else {
+      removeFileProgress(fileId);
       const url = URL.createObjectURL(file);
+      activeBlobUrls.push(url);
       appendFileMessage(file.name, url, file.size, true, state.username || 'You');
       showToast('File sent.', 'success');
     }
@@ -1867,14 +2213,24 @@ ui.fileInput.addEventListener('change', () => {
   };
 
   const readSlice = (o) => {
-    if (!openChannels.some((channel) => channel.readyState === 'open')) {
+    const activeChannels = openChannels.filter(c => c.readyState === 'open');
+    if (activeChannels.length === 0) {
       showToast('File transfer stopped because all peers disconnected.', 'warning');
       return;
     }
-    if (openChannels.some(c => c.bufferedAmount > DATA_CHANNEL_HIGH_WATER)) {
-      setTimeout(() => readSlice(o), 50);
+
+    const congestedChannel = activeChannels.find(c => c.bufferedAmount > DATA_CHANNEL_HIGH_WATER);
+    if (congestedChannel) {
+      const resumeTransfer = () => {
+        congestedChannel.onbufferedamountlow = null;
+        congestedChannel.removeEventListener('close', resumeTransfer);
+        readSlice(o);
+      };
+      congestedChannel.onbufferedamountlow = resumeTransfer;
+      congestedChannel.addEventListener('close', resumeTransfer, { once: true });
       return;
     }
+
     const slice = file.slice(o, o + FILE_CHUNK_SIZE);
     reader.readAsArrayBuffer(slice);
   };
@@ -1888,6 +2244,37 @@ ui.chatInput.addEventListener('keydown', (event) => {
     sendChatMessage();
   }
 });
+const midCallDeviceSelect = document.getElementById('midCallDeviceSelect');
+if (midCallDeviceSelect) {
+  midCallDeviceSelect.addEventListener('change', () => {
+    ui.deviceSelect.value = midCallDeviceSelect.value;
+    ui.deviceSelect.dispatchEvent(new Event('change'));
+  });
+}
+
+const midCallCameraSelect = document.getElementById('midCallCameraSelect');
+if (midCallCameraSelect) {
+  midCallCameraSelect.addEventListener('change', async () => {
+    state.selectedCameraId = midCallCameraSelect.value;
+    if (state.videoEnabled) {
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: getVideoConstraints(),
+      });
+      let videoTrack = cameraStream.getVideoTracks()[0] || null;
+      if (videoTrack) {
+        videoTrack = mirrorVideoTrack(videoTrack);
+        const previousVideoTrack = currentVideoTrack();
+        rebuildLocalStream(currentTrack(), videoTrack);
+        updateLocalVideoPreview();
+        applyLocalTracksToAllPeers();
+        if (previousVideoTrack) previousVideoTrack.stop();
+        showToast('Camera switched successfully.', 'success');
+      }
+    }
+  });
+}
+
 ui.deviceSelect.addEventListener('change', async () => {
   const previousTrack = currentTrack();
   const previousDeviceId = state.selectedDeviceId;
@@ -1954,3 +2341,24 @@ setStatus(
     : 'Unsupported browser',
   supportsRequiredApis() ? 'info' : 'danger'
 );
+
+document.getElementById('tabChat').addEventListener('click', (e) => {
+  e.target.classList.add('active');
+  document.getElementById('tabParticipants').classList.remove('active');
+  document.getElementById('chatPanel').classList.remove('hidden');
+  document.getElementById('participantsPanel').classList.add('hidden');
+});
+
+document.getElementById('tabParticipants').addEventListener('click', (e) => {
+  e.target.classList.add('active');
+  document.getElementById('tabChat').classList.remove('active');
+  document.getElementById('participantsPanel').classList.remove('hidden');
+  document.getElementById('chatPanel').classList.add('hidden');
+});
+
+const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+if (toggleSidebarBtn) {
+  toggleSidebarBtn.addEventListener('click', () => {
+    document.getElementById('sidePanel').classList.toggle('collapsed');
+  });
+}
