@@ -101,7 +101,7 @@ function mixVideos() {
           const drawH = vidH * scale;
           const drawX = x + (w - drawW) / 2;
           const drawY = y + (h - drawH) / 2;
-          
+
           ctx.save();
           ctx.beginPath();
           ctx.rect(x, y, w, h);
@@ -406,7 +406,7 @@ function updateMuteButton() {
   const track = currentTrack();
   ui.muteBtn.disabled = !track;
   const isEnabled = track && track.enabled;
-  
+
   if (isEnabled) {
     ui.muteBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
     ui.muteBtn.classList.add('active');
@@ -416,7 +416,7 @@ function updateMuteButton() {
     ui.muteBtn.classList.remove('active');
     ui.muteBtn.classList.add('danger');
   }
-  
+
   const localMuteIcon = document.getElementById('mute-icon-local');
   if (localMuteIcon) {
     if (isEnabled) localMuteIcon.classList.add('hidden');
@@ -464,12 +464,12 @@ function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass, peer
   badgeEl.className = 'participant-badge ' + badgeClass;
   badgeEl.textContent = badgeLabel;
   item.appendChild(meta);
-  
+
   const micEl = document.createElement('div');
   micEl.className = 'mic-icon';
   if (isMuted) micEl.classList.add('muted');
   micEl.id = `participant-mic-${peerId}`;
-  
+
   if (isMuted) {
     micEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
   } else {
@@ -604,7 +604,7 @@ function pollActiveSpeakers() {
 
     const el = document.getElementById(`participant-${id}`);
     const wrapper = document.getElementById(`video-wrapper-${id}`);
-    
+
     if (average > 15) {
       if (el) el.classList.add('active-speaker');
       if (wrapper) wrapper.classList.add('active-speaker');
@@ -629,9 +629,9 @@ function getAudioConstraints(deviceId = '', exactDevice = false) {
 
 function getVideoConstraints() {
   return {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-    frameRate: { ideal: 30, max: 30 },
+    width: { ideal: 960 },
+    height: { ideal: 540 },
+    frameRate: { ideal: 25, max: 25 },
   };
 }
 
@@ -672,13 +672,13 @@ function updateLocalVideoPreview() {
     wrapper = document.createElement('div');
     wrapper.className = 'video-wrapper';
     wrapper.id = 'video-wrapper-local';
-    
+
     localVideoEl = document.createElement('video');
     localVideoEl.id = 'video-local';
     localVideoEl.autoplay = true;
     localVideoEl.playsInline = true;
     localVideoEl.muted = true;
-    
+
     const muteIcon = document.createElement('div');
     muteIcon.className = 'video-mute-icon hidden';
     muteIcon.id = 'mute-icon-local';
@@ -690,7 +690,7 @@ function updateLocalVideoPreview() {
     avatar.style.position = 'absolute';
     avatar.style.color = 'white';
     avatar.style.fontSize = '2rem';
-    
+
     const nametag = document.createElement('div');
     nametag.className = 'video-nametag';
     nametag.textContent = state.username || 'You (Local)';
@@ -914,7 +914,7 @@ function attachDataChannel(peerId, channel) {
   channel.onopen = () => {
     setChatStateFromPeers();
     refreshRoomStatus();
-    
+
     const track = currentTrack();
     const isAudioEnabled = track ? track.enabled : false;
     try {
@@ -992,7 +992,7 @@ function attachDataChannel(peerId, channel) {
             }, 3000);
           }
         }
-        else if (msg.type === 'video-state'){
+        else if (msg.type === 'video-state') {
           const videoEl = document.getElementById(`video-${peerId}`);
           const wrapper = document.getElementById(`video-wrapper-${peerId}`);
           if (videoEl && wrapper) {
@@ -1015,7 +1015,7 @@ function attachDataChannel(peerId, channel) {
 
       fileState.chunks.push(event.data);
       fileState.receivedSize += event.data.byteLength;
-      
+
       updateFileProgress(fileState.fileId, fileState.receivedSize, fileState.metadata.size);
 
       if (fileState.receivedSize > MAX_FILE_SIZE || fileState.receivedSize > fileState.metadata.size + FILE_CHUNK_SIZE) {
@@ -1054,14 +1054,14 @@ function ensurePeerVideoWrapper(peerId, username = 'Peer') {
     wrapper = document.createElement('div');
     wrapper.className = 'video-wrapper';
     wrapper.id = `video-wrapper-${peerId}`;
-    
+
     const avatar = document.createElement('div');
     avatar.className = 'avatar-placeholder';
     avatar.textContent = username;
     avatar.style.position = 'absolute';
     avatar.style.color = 'white';
     avatar.style.fontSize = '2rem';
-    
+
     const muteIcon = document.createElement('div');
     muteIcon.className = 'video-mute-icon hidden';
     muteIcon.id = `mute-icon-${peerId}`;
@@ -1268,7 +1268,7 @@ function applyLocalTracksToPeer(peerId) {
 
   const pc = peer.pc;
   const transceivers = pc.getTransceivers();
-  
+
   // Permanently identify the correct channels
   const audioTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'audio');
   const videoTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'video');
@@ -1278,7 +1278,7 @@ function applyLocalTracksToPeer(peerId) {
   if (audioTrack) {
     if (audioTransceiver) {
       audioTransceiver.sender.replaceTrack(audioTrack).catch(() => { });
-      
+
       // Upgrade direction if it got stuck in receive-only mode
       if (audioTransceiver.direction !== 'sendrecv' && audioTransceiver.direction !== 'sendonly') {
         audioTransceiver.direction = 'sendrecv';
@@ -1295,13 +1295,31 @@ function applyLocalTracksToPeer(peerId) {
   if (videoTrack) {
     if (videoTransceiver) {
       videoTransceiver.sender.replaceTrack(videoTrack).catch(() => { });
-      
+
       // Upgrade direction if it got stuck in receive-only mode
       if (videoTransceiver.direction !== 'sendrecv' && videoTransceiver.direction !== 'sendonly') {
         videoTransceiver.direction = 'sendrecv';
       }
     } else {
       pc.addTrack(videoTrack, state.localStream || new MediaStream());
+    }
+
+    const currentTransceiver = videoTransceiver || pc.getTransceivers().find(t => t.sender.track === videoTrack);
+    if (currentTransceiver && currentTransceiver.sender) {
+      try {
+        const params = currentTransceiver.sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        if (state.screenSharing) {
+          delete params.encodings[0].maxBitrate;
+        } else {
+          params.encodings[0].maxBitrate = 300000; // 300kbps for webcam
+        }
+        currentTransceiver.sender.setParameters(params).catch(e => console.warn('Failed to set video parameters:', e));
+      } catch (e) {
+        console.warn('Failed to get video parameters:', e);
+      }
     }
   } else if (videoTransceiver) {
     videoTransceiver.sender.replaceTrack(null).catch(() => { });
@@ -1532,7 +1550,7 @@ async function populateDevices(selectedDeviceId = state.selectedDeviceId) {
     const videoDevices = devices.filter((d) => d.kind === 'videoinput');
 
     ui.deviceSelect.innerHTML = '';
-    
+
     if (!audioDevices.length) {
       const option = document.createElement('option');
       option.value = '';
@@ -1553,7 +1571,7 @@ async function populateDevices(selectedDeviceId = state.selectedDeviceId) {
         opt.textContent = device.label || `Microphone ${ui.deviceSelect.options.length}`;
         ui.deviceSelect.appendChild(opt);
       });
-      
+
       const keepValue = ui.deviceSelect.querySelector(`option[value="${selectedDeviceId}"]`) ? selectedDeviceId : '';
       ui.deviceSelect.value = keepValue;
 
@@ -1571,7 +1589,7 @@ async function populateDevices(selectedDeviceId = state.selectedDeviceId) {
       defCamOpt.value = '';
       defCamOpt.textContent = 'Default Camera';
       midCallCameraSelect.appendChild(defCamOpt);
-      
+
       videoDevices.forEach(device => {
         const opt = document.createElement('option');
         opt.value = device.deviceId;
@@ -1744,7 +1762,7 @@ async function handleRemoteOffer(data) {
 
 function handleRemoteAnswer(data) {
   if (!data?.sender || !data?.sdp) return;
-  
+
   queueSignalingTask(data.sender, async () => {
     const peer = state.peers.get(data.sender);
     if (!peer) return;
@@ -1791,7 +1809,7 @@ function handleRemoteIce(data) {
 
 function broadcastVideoState(enabled) {
   const msgStr = JSON.stringify({ type: 'video-state', enabled: enabled });
-  
+
   peerEntries().forEach(([, peer]) => {
     if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
       try {
@@ -1866,14 +1884,14 @@ function appendFileProgress(fileId, name, size, isSelf, senderName = '') {
   progressContainer.style.backgroundColor = isSelf ? 'rgba(255,255,255,0.3)' : 'var(--border)';
   progressContainer.style.borderRadius = '3px';
   progressContainer.style.overflow = 'hidden';
-  
+
   const progressBar = document.createElement('div');
   progressBar.className = 'progress-bar-fill';
   progressBar.style.width = '0%';
   progressBar.style.height = '100%';
   progressBar.style.backgroundColor = isSelf ? 'white' : 'var(--accent)';
   progressBar.style.transition = 'width 0.1s linear';
-  
+
   progressContainer.appendChild(progressBar);
   el.appendChild(progressContainer);
 
@@ -1938,11 +1956,11 @@ function mirrorVideoTrack(track) {
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  
+
   videoEl.onloadedmetadata = () => {
     canvas.width = videoEl.videoWidth;
     canvas.height = videoEl.videoHeight;
-    videoEl.play().catch(() => {});
+    videoEl.play().catch(() => { });
   };
 
   let animationId;
@@ -1977,7 +1995,7 @@ async function toggleVideo() {
     showToast('Cannot enable video while screen sharing is active.', 'warning');
     return;
   }
-  
+
   if (isTogglingVideo) return;
   isTogglingVideo = true;
 
@@ -2035,7 +2053,7 @@ async function toggleVideo() {
   } catch (error) {
     console.error('Camera toggle failed:', error);
     state.videoEnabled = !nextVideoEnabled;
-    ui.videoBtn.innerHTML = state.videoEnabled ? '<i class="fa-solid fa-video"></i>' : '<i class="fa-solid fa-video-slash"></i>'; if(state.videoEnabled) ui.videoBtn.classList.add('active'); else ui.videoBtn.classList.remove('active');
+    ui.videoBtn.innerHTML = state.videoEnabled ? '<i class="fa-solid fa-video"></i>' : '<i class="fa-solid fa-video-slash"></i>'; if (state.videoEnabled) ui.videoBtn.classList.add('active'); else ui.videoBtn.classList.remove('active');
     showToast('Camera access failed. Check browser permissions or another app using the camera.', 'error');
   } finally {
     isTogglingVideo = false;
@@ -2050,17 +2068,28 @@ async function toggleScreenShare() {
       return;
     }
     try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 20, max: 20 }
+        },
+        audio: true
+      });
       state.screenSharing = true;
       state.localVideoTrack = displayStream.getVideoTracks()[0];
+      if (state.localVideoTrack) {
+        state.localVideoTrack.contentHint = 'detail';
+      }
 
       state.localVideoTrack.onended = () => {
         stopScreenShare();
       };
 
       ui.screenShareBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2m4 0h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2"></path><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
-      ui.screenShareBtn.classList.add('danger'); ui.screenShareBtn.classList.add('active');
-      
+      ui.screenShareBtn.classList.add('danger');
+      ui.screenShareBtn.classList.add('active');
+
       ui.videoBtn.disabled = true;
 
       updateLocalVideoPreview();
@@ -2105,11 +2134,11 @@ function toggleMute() {
   updateMuteButton();
   refreshRoomStatus();
   showToast(track.enabled ? 'Microphone unmuted.' : 'Microphone muted.', 'info', 1800);
-  
+
   const msgStr = JSON.stringify({ type: 'audio-state', enabled: track.enabled });
   peerEntries().forEach(([, peer]) => {
     if (peer.dataChannel?.readyState === 'open') {
-      try { peer.dataChannel.send(msgStr); } catch (e) {}
+      try { peer.dataChannel.send(msgStr); } catch (e) { }
     }
   });
 }
@@ -2281,7 +2310,7 @@ ui.fileInput.addEventListener('change', () => {
     });
     offset += chunk.byteLength;
     updateFileProgress(fileId, offset, file.size);
-    
+
     if (offset < file.size) {
       readSlice(offset);
     } else {
