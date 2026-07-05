@@ -60,6 +60,7 @@ const state = {
   recording: false,
   recordingDestination: null,
   recordingPoll: null,
+  focusedPeerId: null
 };
 
 let mediaRecorder;
@@ -446,7 +447,7 @@ function setChatStateFromPeers() {
   ui.attachFileBtn.disabled = !state.roomId || !hasOpenDataChannel;
 }
 
-function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass, peerId = 'local') {
+function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass, peerId = 'local', isMuted = false) {
   const item = document.createElement('div');
   item.className = 'participant-item';
   const meta = document.createElement('div');
@@ -466,8 +467,15 @@ function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass, peer
   
   const micEl = document.createElement('div');
   micEl.className = 'mic-icon';
+  if (isMuted) micEl.classList.add('muted');
   micEl.id = `participant-mic-${peerId}`;
-  micEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+  
+  if (isMuted) {
+    micEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+  } else {
+    micEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+  }
+
   item.appendChild(micEl);
   item.appendChild(badgeEl);
   return item;
@@ -477,8 +485,10 @@ function renderParticipants() {
   const peerIds = [...state.peers.keys()].sort((a, b) => a.localeCompare(b));
   ui.participantList.innerHTML = '';
 
-  const hasMic = Boolean(currentTrack());
-  const youItem = buildParticipantItem(state.username || 'You', hasMic ? 'Microphone active' : 'Microphone unavailable', hasMic ? 'Ready' : 'No Mic', hasMic ? 'audio' : 'connecting', 'local');
+  const track = currentTrack();
+  const isLocalMuted = track ? !track.enabled : true;
+  const hasMic = Boolean(track);
+  const youItem = buildParticipantItem(state.username || 'You', hasMic ? (isLocalMuted ? 'Muted' : 'Microphone active') : 'Microphone unavailable', hasMic ? 'Ready' : 'No Mic', hasMic ? 'audio' : 'connecting', 'local', isLocalMuted);
   youItem.id = `participant-local`;
   ui.participantList.appendChild(youItem);
 
@@ -502,7 +512,8 @@ function renderParticipants() {
     const peer = state.peers.get(peerId);
     const badge = describePeerBadge(peer);
 
-    const item = buildParticipantItem(peer.username || 'Anonymous', describePeerConnection(peer), badge.label, badge.className, peerId);
+    const isMuted = peer.isAudioMuted || false;
+    const item = buildParticipantItem(peer.username || 'Anonymous', describePeerConnection(peer), badge.label, badge.className, peerId, isMuted);
     item.id = `participant-${peerId}`;
     ui.participantList.appendChild(item);
   });
@@ -592,12 +603,14 @@ function pollActiveSpeakers() {
     const average = sum / dataArray.length;
 
     const el = document.getElementById(`participant-${id}`);
-    if (el) {
-      if (average > 15) {
-        el.classList.add('active-speaker');
-      } else {
-        el.classList.remove('active-speaker');
-      }
+    const wrapper = document.getElementById(`video-wrapper-${id}`);
+    
+    if (average > 15) {
+      if (el) el.classList.add('active-speaker');
+      if (wrapper) wrapper.classList.add('active-speaker');
+    } else {
+      if (el) el.classList.remove('active-speaker');
+      if (wrapper) wrapper.classList.remove('active-speaker');
     }
   });
 }
@@ -632,6 +645,24 @@ function rebuildLocalStream(audioTrack = currentTrack(), videoTrack = state.vide
   return nextStream;
 }
 
+function unfocusVideo() {
+  if (state.focusedPeerId) {
+    const wrapper = document.getElementById(`video-wrapper-${state.focusedPeerId}`);
+    if (wrapper) wrapper.classList.remove('focused');
+    state.focusedPeerId = null;
+  }
+}
+
+function focusVideo(peerId) {
+  if (state.focusedPeerId === peerId) return;
+  unfocusVideo();
+  const wrapper = document.getElementById(`video-wrapper-${peerId}`);
+  if (wrapper) {
+    wrapper.classList.add('focused');
+    state.focusedPeerId = peerId;
+  }
+}
+
 function updateLocalVideoPreview() {
   const videoTrack = state.screenSharing ? state.localVideoTrack : (state.videoEnabled ? currentVideoTrack() : null);
   let localVideoEl = document.getElementById('video-local');
@@ -664,10 +695,23 @@ function updateLocalVideoPreview() {
     nametag.className = 'video-nametag';
     nametag.textContent = state.username || 'You (Local)';
 
+    const unpinBtn = document.createElement('div');
+    unpinBtn.className = 'unpin-btn';
+    unpinBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+    unpinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      unfocusVideo();
+    });
+
+    wrapper.addEventListener('click', () => {
+      focusVideo('local');
+    });
+
     wrapper.appendChild(localVideoEl);
     wrapper.appendChild(muteIcon);
     wrapper.appendChild(avatar);
     wrapper.appendChild(nametag);
+    wrapper.appendChild(unpinBtn);
     ui.videoContainer.appendChild(wrapper);
   }
 
@@ -870,6 +914,15 @@ function attachDataChannel(peerId, channel) {
   channel.onopen = () => {
     setChatStateFromPeers();
     refreshRoomStatus();
+    
+    const track = currentTrack();
+    const isAudioEnabled = track ? track.enabled : false;
+    try {
+      channel.send(JSON.stringify({ type: 'audio-state', enabled: isAudioEnabled }));
+      channel.send(JSON.stringify({ type: 'video-state', enabled: state.videoEnabled }));
+    } catch (e) {
+      console.warn('Failed to send initial state:', e);
+    }
   };
 
   channel.onclose = () => {
@@ -911,6 +964,7 @@ function attachDataChannel(peerId, channel) {
           showToast(`Receiving file: ${fileName}...`, 'info');
         }
         else if (msg.type === 'audio-state') {
+          peer.isAudioMuted = !msg.enabled;
           const muteIcon = document.getElementById(`mute-icon-${peerId}`);
           if (muteIcon) {
             if (msg.enabled) muteIcon.classList.add('hidden');
@@ -940,9 +994,16 @@ function attachDataChannel(peerId, channel) {
         }
         else if (msg.type === 'video-state'){
           const videoEl = document.getElementById(`video-${peerId}`);
-          if (videoEl) {
-            videoEl.style.transition = 'opacity 0.2s ease';
-            videoEl.style.opacity = msg.enabled ? '1' : '0';
+          const wrapper = document.getElementById(`video-wrapper-${peerId}`);
+          if (videoEl && wrapper) {
+            const avatar = wrapper.querySelector('.avatar-placeholder');
+            if (msg.enabled) {
+              videoEl.style.opacity = '1';
+              if (avatar) avatar.style.display = 'none';
+            } else {
+              videoEl.style.opacity = '0';
+              if (avatar) avatar.style.display = 'block';
+            }
           }
         }
       } catch (e) {
@@ -1016,9 +1077,22 @@ function ensurePeerVideoWrapper(peerId, username = 'Peer') {
     nametag.id = `nametag-${peerId}`;
     nametag.textContent = username;
 
+    const unpinBtn = document.createElement('div');
+    unpinBtn.className = 'unpin-btn';
+    unpinBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+    unpinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      unfocusVideo();
+    });
+
+    wrapper.addEventListener('click', () => {
+      focusVideo(peerId);
+    });
+
     wrapper.appendChild(avatar);
     wrapper.appendChild(muteIcon);
     wrapper.appendChild(nametag);
+    wrapper.appendChild(unpinBtn);
     ui.videoContainer.appendChild(wrapper);
   }
 }
@@ -1278,6 +1352,9 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
 
   const videoWrapper = document.getElementById(`video-wrapper-${peerId}`);
   if (videoWrapper) {
+    if (state.focusedPeerId === peerId) {
+      unfocusVideo();
+    }
     const vEl = document.getElementById(`video-${peerId}`);
     if (vEl) vEl.srcObject = null;
     videoWrapper.remove();
@@ -1331,6 +1408,7 @@ function leaveRoom(options = {}) {
     stopRecording();
   }
 
+  unfocusVideo();
   clearAllPeers();
   stopLocalStream();
 
@@ -1687,22 +1765,23 @@ function handleRemoteAnswer(data) {
 }
 
 function handleRemoteIce(data) {
-  if (!data?.sender || !data?.candidate) return;
+  if (!data?.sender || !data?.candidate || typeof data.candidate !== 'object') return;
 
   queueSignalingTask(data.sender, async () => {
     const peer = state.peers.get(data.sender);
     if (!peer) return;
 
     try {
+      if (!data.candidate.candidate) return; // Ignore empty candidates
       const candidate = new RTCIceCandidate(data.candidate);
       if (!peer.pc.remoteDescription) {
         peer.iceQueue.push(candidate);
       } else {
-        await peer.pc.addIceCandidate(candidate);
+        await peer.pc.addIceCandidate(candidate).catch(e => console.warn('Ignored invalid candidate:', e));
       }
     } catch (error) {
       if (!peer.ignoreOffer) {
-        console.error('Failed to add ICE candidate:', error);
+        console.warn('ICE parsing failed:', error);
       }
     }
   });
@@ -2014,7 +2093,11 @@ function stopScreenShare() {
 
 function toggleMute() {
   const track = currentTrack();
-  if (!track) return;
+  if (!track) {
+    showToast('Microphone disconnected. Attempting to restore...', 'warning');
+    retryMicAccess();
+    return;
+  }
 
   track.enabled = !track.enabled;
   updateMuteButton();
@@ -2255,21 +2338,30 @@ if (midCallDeviceSelect) {
 const midCallCameraSelect = document.getElementById('midCallCameraSelect');
 if (midCallCameraSelect) {
   midCallCameraSelect.addEventListener('change', async () => {
+    if (isAcquiringMedia) return;
     state.selectedCameraId = midCallCameraSelect.value;
     if (state.videoEnabled) {
-      const cameraStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: getVideoConstraints(),
-      });
-      let videoTrack = cameraStream.getVideoTracks()[0] || null;
-      if (videoTrack) {
-        videoTrack = mirrorVideoTrack(videoTrack);
-        const previousVideoTrack = currentVideoTrack();
-        rebuildLocalStream(currentTrack(), videoTrack);
-        updateLocalVideoPreview();
-        applyLocalTracksToAllPeers();
-        if (previousVideoTrack) previousVideoTrack.stop();
-        showToast('Camera switched successfully.', 'success');
+      isAcquiringMedia = true;
+      try {
+        const cameraStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: getVideoConstraints(),
+        });
+        let videoTrack = cameraStream.getVideoTracks()[0] || null;
+        if (videoTrack) {
+          videoTrack = mirrorVideoTrack(videoTrack);
+          const previousVideoTrack = currentVideoTrack();
+          rebuildLocalStream(currentTrack(), videoTrack);
+          updateLocalVideoPreview();
+          applyLocalTracksToAllPeers();
+          if (previousVideoTrack) previousVideoTrack.stop();
+          showToast('Camera switched successfully.', 'success');
+        }
+      } catch (e) {
+        console.error('Failed to switch camera:', e);
+        showToast('Failed to access selected camera.', 'error');
+      } finally {
+        isAcquiringMedia = false;
       }
     }
   });
@@ -2329,6 +2421,20 @@ updateRetryButton();
 updatePeerCount();
 refreshRoomStatus();
 populateDevices();
+
+async function requestInitialPermissions() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    stream.getTracks().forEach(track => track.stop());
+    await populateDevices();
+  } catch (error) {
+    console.warn("Initial permission request skipped or denied. Device labels will be hidden until joined.", error);
+  }
+}
+
+if (supportsRequiredApis()) {
+  requestInitialPermissions();
+}
 
 if (!supportsRequiredApis()) {
   showToast('This browser does not support the required microphone or WebRTC features.', 'error');

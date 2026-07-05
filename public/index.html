@@ -145,6 +145,48 @@
       justify-content: center;
       overflow: hidden;
       padding-bottom: 80px; /* Space for controls */
+      position: relative;
+    }
+
+    .video-wrapper.focused {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 80px; /* Space for controls */
+      width: 100%;
+      height: calc(100% - 80px);
+      max-height: 100%;
+      z-index: 50;
+      border-radius: var(--radius-lg);
+      margin: 0;
+      background: var(--bg-0);
+    }
+    
+    .unpin-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      z-index: 60;
+      transition: all 0.2s;
+    }
+    .unpin-btn:hover {
+      background: var(--danger);
+      transform: scale(1.05);
+    }
+    .video-wrapper.focused .unpin-btn {
+      display: flex;
     }
 
     .video-wrapper {
@@ -161,12 +203,13 @@
       align-items: center;
       justify-content: center;
       box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+      transition: all 0.35s cubic-bezier(0.25, 1, 0.5, 1);
     }
     
     .video-wrapper video {
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
     }
     
     .video-wrapper.active-speaker {
@@ -255,11 +298,17 @@
       background: rgba(255,255,255,0.05);
       border-radius: var(--radius-md);
       border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+    .participant-item.active-speaker {
+      border-color: #22c55e;
+      background: rgba(34, 197, 94, 0.1);
     }
     .participant-meta { display: flex; flex-direction: column; }
     .participant-name { font-weight: 600; font-size: 0.95rem; }
     .participant-status { font-size: 0.8rem; color: var(--muted); }
-    .mic-icon { color: var(--muted); font-size: 0.9rem; }
+    .mic-icon { color: var(--muted); font-size: 0.9rem; transition: color 0.2s; }
+    .mic-icon:not(.muted) { color: #22c55e; }
     .mic-icon.muted { color: var(--danger); }
     
     #chatBox {
