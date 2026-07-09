@@ -5,12 +5,14 @@ const helmet = require('helmet');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
-const MAX_ROOM_CAPACITY = 6;
+const MAX_ROOM_CAPACITY = 8;
 const ROOM_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const DEFAULT_ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -18,8 +20,8 @@ const DEFAULT_ICE_SERVERS = [
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:global.stun.twilio.com:3478' }
 ];
-const RATE_LIMIT_WINDOW_MS = 1500;
-const RATE_LIMIT_MAX_EVENTS = 1500;
+const RATE_LIMIT_WINDOW_MS = 1000;
+const RATE_LIMIT_MAX_EVENTS = 100;
 const MAX_USERNAME_LENGTH = 32;
 const MAX_PASSWORD_LENGTH = 128;
 
@@ -59,28 +61,39 @@ function normalizeIceServers(rawServers) {
 }
 
 async function fetchMeteredIceServers(project, apiKey) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
-    const response = await fetch(`https://${project}.metered.live/api/v1/turn/credentials?apiKey=${apiKey}`);
+    const response = await fetch(`https://${project}.metered.live/api/v1/turn/credentials?apiKey=${apiKey}`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
     if (!response.ok) return null;
     const data = await response.json();
     return normalizeIceServers(data);
   } catch (error) {
+    clearTimeout(timeoutId);
     console.error('Failed to fetch Metered TURN API:', error);
     return null;
   }
 }
 
 async function fetchTwilioIceServers(accountSid, authToken) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
     const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
     const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Tokens.json`, {
       method: 'POST',
       headers: { 'Authorization': `Basic ${auth}` },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     if (!response.ok) return null;
     const data = await response.json();
     return normalizeIceServers(data.ice_servers);
   } catch (error) {
+    clearTimeout(timeoutId);
     console.error('Failed to fetch Twilio NTS API:', error);
     return null;
   }
@@ -88,6 +101,7 @@ async function fetchTwilioIceServers(accountSid, authToken) {
 
 let cachedIceServers = null;
 let iceServersCacheExpiry = 0;
+let iceServersPromise = null;
 
 async function getIceServers() {
   const now = Date.now();
@@ -95,45 +109,56 @@ async function getIceServers() {
     return cachedIceServers;
   }
 
-  let servers = [];
-  const explicit = parseJsonArray(process.env.ICE_SERVERS_JSON);
-  
-  if (explicit) {
-    const normalized = normalizeIceServers(explicit);
-    if (normalized.length) servers = normalized;
+  if (iceServersPromise) {
+    return iceServersPromise;
   }
 
-  if (!servers.length && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    const twilioServers = await fetchTwilioIceServers(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    if (twilioServers && twilioServers.length) servers = twilioServers;
-  }
+  iceServersPromise = (async () => {
+    let servers = [];
+    const explicit = parseJsonArray(process.env.ICE_SERVERS_JSON);
 
-  if (!servers.length && process.env.METERED_PROJECT && process.env.METERED_API_KEY) {
-    const meteredServers = await fetchMeteredIceServers(process.env.METERED_PROJECT, process.env.METERED_API_KEY);
-    if (meteredServers && meteredServers.length) servers = meteredServers;
-  }
-
-  if (!servers.length) {
-    const envServers = splitList(process.env.STUN_URLS).map((url) => ({ urls: url }));
-    const turnUrls = splitList(process.env.TURN_URLS);
-    if (turnUrls.length) {
-      const turnServer = { urls: turnUrls.length === 1 ? turnUrls[0] : turnUrls };
-      const username = String(process.env.TURN_USERNAME || '').trim();
-      const credential = String(process.env.TURN_CREDENTIAL || process.env.TURN_CREDENTIALS || '').trim();
-      if (username) turnServer.username = username;
-      if (credential) turnServer.credential = credential;
-      envServers.push(turnServer);
+    if (explicit) {
+      const normalized = normalizeIceServers(explicit);
+      if (normalized.length) servers = normalized;
     }
 
-    if (!envServers.length) {
-      envServers.push(...DEFAULT_ICE_SERVERS);
+    if (!servers.length && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+      const twilioServers = await fetchTwilioIceServers(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      if (twilioServers && twilioServers.length) servers = twilioServers;
     }
-    servers = normalizeIceServers(envServers);
-  }
 
-  cachedIceServers = servers;
-  iceServersCacheExpiry = now + 15 * 60 * 1000;
-  return cachedIceServers;
+    if (!servers.length && process.env.METERED_PROJECT && process.env.METERED_API_KEY) {
+      const meteredServers = await fetchMeteredIceServers(process.env.METERED_PROJECT, process.env.METERED_API_KEY);
+      if (meteredServers && meteredServers.length) servers = meteredServers;
+    }
+
+    if (!servers.length) {
+      const envServers = splitList(process.env.STUN_URLS).map((url) => ({ urls: url }));
+      const turnUrls = splitList(process.env.TURN_URLS);
+      if (turnUrls.length) {
+        const turnServer = { urls: turnUrls.length === 1 ? turnUrls[0] : turnUrls };
+        const username = String(process.env.TURN_USERNAME || '').trim();
+        const credential = String(process.env.TURN_CREDENTIAL || process.env.TURN_CREDENTIALS || '').trim();
+        if (username) turnServer.username = username;
+        if (credential) turnServer.credential = credential;
+        envServers.push(turnServer);
+      }
+
+      if (!envServers.length) {
+        envServers.push(...DEFAULT_ICE_SERVERS);
+      }
+      servers = normalizeIceServers(envServers);
+    }
+
+    cachedIceServers = servers;
+    const hasTurn = servers.some(s => s.urls && (Array.isArray(s.urls) ? s.urls.some(u => u.includes('turn:')) : s.urls.includes('turn:')));
+    const isFallback = !hasTurn && (process.env.TWILIO_ACCOUNT_SID || process.env.METERED_PROJECT);
+    iceServersCacheExpiry = Date.now() + (isFallback ? 30 * 1000 : 15 * 60 * 1000);
+    iceServersPromise = null;
+    return cachedIceServers;
+  })();
+
+  return iceServersPromise;
 }
 
 app.disable('x-powered-by');
@@ -147,7 +172,7 @@ app.use(
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", 'data:'],
-        connectSrc: ["'self'", "stun:", "turn:", "*", "wss:", "ws:"],
+        connectSrc: ["'self'", "stun:", "turn:", "wss:", "ws:", "https://*.metered.live", "https://api.twilio.com"],
         mediaSrc: ["'self'", 'blob:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -178,6 +203,40 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
   },
   maxHttpBufferSize: 1e5,
+});
+
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  message: 'Too many connections',
+});
+
+io.engine.use((req, res, next) => {
+  const forwarded = req.headers['x-forwarded-for'];
+  req.ip = forwarded ? forwarded.split(',')[0].trim() : req.socket.remoteAddress;
+  if (typeof res.status !== 'function') {
+    res.status = function (statusCode) {
+      res.statusCode = statusCode;
+      return res;
+    };
+  }
+  if (typeof res.send !== 'function') {
+    res.send = function (body) {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/plain');
+      }
+      res.end(String(body));
+    };
+  }
+  if (typeof res.json !== 'function') {
+    res.json = function (body) {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'application/json');
+      }
+      res.end(JSON.stringify(body));
+    };
+  }
+  limiter(req, res, next);
 });
 
 function normalizeRoomName(roomName) {
@@ -234,16 +293,19 @@ io.on('connection', (socket) => {
   let currentRoom = null;
   let eventTokens = RATE_LIMIT_MAX_EVENTS;
   let lastRefill = Date.now();
+  const tokensPerMs = RATE_LIMIT_MAX_EVENTS / RATE_LIMIT_WINDOW_MS;
 
   function checkRateLimit() {
     const now = Date.now();
     const elapsed = now - lastRefill;
-    if (elapsed >= RATE_LIMIT_WINDOW_MS) {
-      eventTokens = RATE_LIMIT_MAX_EVENTS;
+
+    if (elapsed > 0) {
+      eventTokens = Math.min(RATE_LIMIT_MAX_EVENTS, eventTokens + elapsed * tokensPerMs);
       lastRefill = now;
     }
-    if (eventTokens > 0) {
-      eventTokens--;
+
+    if (eventTokens >= 1) {
+      eventTokens -= 1;
       return true;
     }
     return false;
@@ -277,112 +339,123 @@ io.on('connection', (socket) => {
   };
 
   socket.on('join-room', async (payload, ack) => {
-    if (!checkRateLimit()) {
-      if (typeof ack === 'function') {
-        ack({
-          ok: false,
-          code: 'rate-limited',
-          message: 'Too many requests. Wait a moment and try again.',
-        });
-      }
-      return;
-    }
-
-    const safePayload = payload && typeof payload === 'object' ? payload : {};
-    const roomName = typeof payload === 'string' ? payload : safePayload.roomId;
-    const rawUsername = typeof safePayload.username === 'string' ? safePayload.username.trim() : '';
-    const username = (rawUsername || 'Anonymous').slice(0, MAX_USERNAME_LENGTH);
-    const password = typeof safePayload.password === 'string' ? safePayload.password : '';
-    const room = normalizeRoomName(roomName);
-
-    if (!isValidRoomName(room)) {
-      if (typeof ack === 'function') {
-        ack({
-          ok: false,
-          code: 'invalid-room',
-          message: 'Room IDs must be 1-64 characters using letters, numbers, _ or -.',
-        });
-      }
-      return;
-    }
-
-    if (password.length > MAX_PASSWORD_LENGTH) {
-      if (typeof ack === 'function') {
-        ack({
-          ok: false,
-          code: 'invalid-password',
-          message: `Room passwords must be ${MAX_PASSWORD_LENGTH} characters or fewer.`,
-        });
-      }
-      return;
-    }
-
-    if (currentRoom && currentRoom !== room) {
-      leaveCurrentRoom(true);
-    }
-
-    const existingMeta = roomMetadata.get(room);
-    const occupancy = existingMeta ? existingMeta.users.size : 0;
-
-    if (occupancy >= MAX_ROOM_CAPACITY) {
-      if (typeof ack === 'function') {
-        ack({
-          ok: false,
-          code: 'room-full',
-          message: 'This room already has 6 participants.',
-          room,
-          max: MAX_ROOM_CAPACITY,
-        });
-      }
-      return;
-    }
-
-    if (occupancy === 0) {
-      const users = new Map();
-      users.set(socket.id, username);
-      roomMetadata.set(room, { password, users });
-    } else {
-      if (existingMeta.password !== password) {
+    try {
+      if (!checkRateLimit()) {
         if (typeof ack === 'function') {
           ack({
             ok: false,
-            code: 'invalid-password',
-            message: 'Incorrect room password.',
+            code: 'rate-limited',
+            message: 'Too many requests. Wait a moment and try again.',
           });
         }
         return;
       }
-      existingMeta.users.set(socket.id, username);
-    }
 
-    const existingPeerIds = getRoomPeerIds(room, socket.id);
-    currentRoom = room;
-    await socket.join(room);
+      const safePayload = payload && typeof payload === 'object' ? payload : {};
+      const roomName = typeof payload === 'string' ? payload : safePayload.roomId;
+      const rawUsername = typeof safePayload.username === 'string' ? safePayload.username.trim() : '';
+      const username = (rawUsername || 'Anonymous').slice(0, MAX_USERNAME_LENGTH);
+      const password = typeof safePayload.password === 'string' ? safePayload.password : '';
+      const room = normalizeRoomName(roomName);
 
-    socket.to(room).emit('peer-joined', {
-      peerId: socket.id,
-      username,
-      room,
-    });
-    emitRoomState(room);
+      if (!isValidRoomName(room)) {
+        if (typeof ack === 'function') {
+          ack({
+            ok: false,
+            code: 'invalid-room',
+            message: 'Room IDs must be 1-64 characters using letters, numbers, _ or -.',
+          });
+        }
+        return;
+      }
 
-    if (typeof ack === 'function') {
-      const snapshot = getRoomSnapshot(room);
-      ack({
-        ok: true,
+      if (password.length > MAX_PASSWORD_LENGTH) {
+        if (typeof ack === 'function') {
+          ack({
+            ok: false,
+            code: 'invalid-password',
+            message: `Room passwords must be ${MAX_PASSWORD_LENGTH} characters or fewer.`,
+          });
+        }
+        return;
+      }
+
+      if (currentRoom && currentRoom !== room) {
+        leaveCurrentRoom(true);
+      }
+
+      const existingMeta = roomMetadata.get(room);
+      const occupancy = existingMeta ? existingMeta.users.size : 0;
+
+      if (occupancy >= MAX_ROOM_CAPACITY) {
+        if (typeof ack === 'function') {
+          ack({
+            ok: false,
+            code: 'room-full',
+            message: `This room already has ${MAX_ROOM_CAPACITY} participants.`,
+            room,
+            max: MAX_ROOM_CAPACITY,
+          });
+        }
+        return;
+      }
+
+      if (occupancy === 0) {
+        const users = new Map();
+        users.set(socket.id, username);
+        roomMetadata.set(room, { password, users });
+      } else {
+        if (existingMeta.password !== password) {
+          if (typeof ack === 'function') {
+            ack({
+              ok: false,
+              code: 'invalid-password',
+              message: 'Incorrect room password.',
+            });
+          }
+          return;
+        }
+        existingMeta.users.set(socket.id, username);
+      }
+
+      const existingPeerIds = getRoomPeerIds(room, socket.id);
+      currentRoom = room;
+      await socket.join(room);
+
+      socket.to(room).emit('peer-joined', {
+        peerId: socket.id,
+        username,
         room,
-        peers: existingPeerIds,
-        roomPeers: snapshot.peers,
-        usernames: snapshot.usernames,
-        peerCount: existingPeerIds.length + 1,
       });
+      emitRoomState(room);
+
+      if (typeof ack === 'function') {
+        const snapshot = getRoomSnapshot(room);
+        ack({
+          ok: true,
+          room,
+          peers: existingPeerIds,
+          roomPeers: snapshot.peers,
+          usernames: snapshot.usernames,
+          peerCount: existingPeerIds.length + 1,
+        });
+      }
+    } catch (error) {
+      console.error('Unhandled error in join-room:', error);
+      if (typeof ack === 'function') {
+        ack({
+          ok: false,
+          code: 'internal-error',
+          message: 'An internal server error occurred.',
+        });
+      }
     }
   });
 
   socket.on('webrtc-offer', (data = {}) => {
     if (!checkRateLimit()) return;
     if (!currentRoom || typeof data.target !== 'string' || !data.sdp) return;
-    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string') return;
+    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 15000) return;
     forwardIfValid(currentRoom, data.target, 'webrtc-offer', {
       sender: socket.id,
       room: currentRoom,
@@ -393,7 +466,7 @@ io.on('connection', (socket) => {
   socket.on('webrtc-answer', (data = {}) => {
     if (!checkRateLimit()) return;
     if (!currentRoom || typeof data.target !== 'string' || !data.sdp) return;
-    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string') return;
+    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 15000) return;
     forwardIfValid(currentRoom, data.target, 'webrtc-answer', {
       sender: socket.id,
       room: currentRoom,
@@ -408,6 +481,48 @@ io.on('connection', (socket) => {
       sender: socket.id,
       room: currentRoom,
       candidate: data.candidate,
+    });
+  });
+
+  socket.on('room-chat-message', (data = {}) => {
+    if (!checkRateLimit()) return;
+    if (!currentRoom) return;
+
+    if (data.encrypted) {
+      if (typeof data.payload !== 'string' || data.payload.length > 50000) return;
+      if (typeof data.iv !== 'string' || data.iv.length > 100) return;
+      socket.to(currentRoom).emit('room-chat-message', {
+        senderId: socket.id,
+        encrypted: true,
+        payload: data.payload,
+        iv: data.iv,
+      });
+    } else {
+      if (typeof data.text !== 'string' || data.text.length > 4000) return;
+      socket.to(currentRoom).emit('room-chat-message', {
+        senderId: socket.id,
+        text: data.text,
+        username: data.username || 'Anonymous',
+      });
+    }
+  });
+
+  socket.on('media-state-change', (data = {}) => {
+    if (!checkRateLimit()) return;
+    if (!currentRoom || typeof data.type !== 'string' || typeof data.enabled !== 'boolean') return;
+    socket.to(currentRoom).emit('media-state-change', {
+      senderId: socket.id,
+      type: data.type,
+      enabled: data.enabled,
+    });
+  });
+
+  socket.on('typing', (data = {}) => {
+    if (!checkRateLimit()) return;
+    if (!currentRoom) return;
+    socket.to(currentRoom).emit('typing', {
+      senderId: socket.id,
+      username: data.username || 'Anonymous',
     });
   });
 

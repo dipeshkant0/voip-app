@@ -40,7 +40,83 @@ const rtcConfig = {
   iceServers: normalizeIceServers(runtimeConfig.iceServers),
 };
 
+// --- Crypto Utilities for Zero-Knowledge E2EE ---
+async function hashPassword(password) {
+  if (!password) return '';
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function deriveChatKey(password, roomId) {
+  if (!password) return null;
+  const encoder = new TextEncoder();
+  const keyMaterial = await window.crypto.subtle.importKey(
+    'raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveBits', 'deriveKey']
+  );
+  const salt = encoder.encode(roomId || 'default_salt');
+  return window.crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+}
+
+function bufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+function base64ToBuffer(base64) {
+  const binary = window.atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function encryptMessage(key, text) {
+  if (!key) return null;
+  const encoder = new TextEncoder();
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    encoder.encode(text)
+  );
+  return {
+    payload: bufferToBase64(encrypted),
+    iv: bufferToBase64(iv)
+  };
+}
+
+async function decryptMessage(key, encryptedBase64, ivBase64) {
+  if (!key) throw new Error('No decryption key available');
+  const encrypted = base64ToBuffer(encryptedBase64);
+  const iv = base64ToBuffer(ivBase64);
+  const decrypted = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    encrypted
+  );
+  const decoder = new TextDecoder();
+  return decoder.decode(decrypted);
+}
+// ------------------------------------------------
+
 const state = {
+  e2eeKey: null,
   roomId: '',
   localStream: null,
   rawStream: null,
@@ -55,17 +131,22 @@ const state = {
   audioAnalysers: new Map(), // peerId -> analyser
   videoEnabled: false,
   screenSharing: false,
-  localVideoTrack: null,
-  incomingFiles: new Map(), // peerId -> { metadata, chunks, receivedSize }
+  screenAudioContext: null,
+  mixedAudioTrack: null,
+  tabAudioSource: null,
+  micAudioSource: null,
+  incomingFiles: new Map(), // fileId -> { fileId, peerId, metadata, chunks, receivedSize }
   recording: false,
-  recordingDestination: null,
-  recordingPoll: null,
+  roomPassword: '',
   focusedPeerId: null
 };
 
 let mediaRecorder;
 let recordedChunks = [];
-let audioSources = new Map();
+let recordingTabAudioSource = null;
+let recordingMicAudioSource = null;
+let recordingFileHandle = null;
+let recordingWritableStream = null;
 let speakerPollId = null;
 let activeBlobUrls = [];
 
@@ -74,138 +155,129 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const FILE_CHUNK_SIZE = 16 * 1024;
 const DATA_CHANNEL_HIGH_WATER = 1024 * 1024;
 
-function mixVideos() {
-  const canvas = document.getElementById('recordingCanvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const videoElements = Array.from(document.querySelectorAll('video')).filter(v => v.srcObject && v.readyState >= 2);
-  if (videoElements.length > 0) {
-    const cols = Math.ceil(Math.sqrt(videoElements.length));
-    const rows = Math.ceil(videoElements.length / cols);
-    const w = canvas.width / cols;
-    const h = canvas.height / rows;
-
-    videoElements.forEach((vid, i) => {
-      const x = (i % cols) * w;
-      const y = Math.floor(i / cols) * h;
-      try {
-        const vidW = vid.videoWidth;
-        const vidH = vid.videoHeight;
-        if (vidW > 0 && vidH > 0) {
-          const scale = Math.max(w / vidW, h / vidH);
-          const drawW = vidW * scale;
-          const drawH = vidH * scale;
-          const drawX = x + (w - drawW) / 2;
-          const drawY = y + (h - drawH) / 2;
-
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(x, y, w, h);
-          ctx.clip();
-          ctx.drawImage(vid, drawX, drawY, drawW, drawH);
-          ctx.restore();
-        }
-      } catch (e) { }
-    });
-  }
-
-  if (state.recording) {
-    state.recordingPoll = setTimeout(mixVideos, 1000 / 30);
-  }
-}
-
-function startRecording() {
-  if (!state.audioContext) {
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextCtor) {
-      state.audioContext = new AudioContextCtor();
-    }
-  }
-
-  if (!state.audioContext) {
-    showToast('AudioContext not supported for recording.', 'error');
-    return;
-  }
-
-  state.recordingDestination = state.audioContext.createMediaStreamDestination();
-
-  if (state.localStream && state.localStream.getAudioTracks().length > 0) {
-    try {
-      const source = state.audioContext.createMediaStreamSource(new MediaStream([state.localStream.getAudioTracks()[0]]));
-      source.connect(state.recordingDestination);
-      audioSources.set('local', source);
-    } catch (e) { }
-  }
-
-  peerEntries().forEach(([peerId]) => {
-    const audioEl = document.getElementById(`audio-${peerId}`);
-    if (audioEl && audioEl.srcObject) {
-      try {
-        const source = state.audioContext.createMediaStreamSource(audioEl.srcObject);
-        source.connect(state.recordingDestination);
-        audioSources.set(peerId, source);
-      } catch (e) { }
-    }
-  });
-
-  state.recording = true;
-
-  let canvas = document.getElementById('recordingCanvas');
-  if (!canvas) {
-    canvas = document.createElement('canvas');
-    canvas.id = 'recordingCanvas';
-    canvas.width = 1280;
-    canvas.height = 720;
-    canvas.style.display = 'none';
-    document.body.appendChild(canvas);
-  }
-  mixVideos();
-
-  const canvasStream = canvas.captureStream(30);
-  const mixedStream = new MediaStream([
-    ...canvasStream.getVideoTracks(),
-    ...state.recordingDestination.stream.getAudioTracks()
-  ]);
-
-  recordedChunks = [];
+async function startRecording() {
   try {
-    mediaRecorder = new MediaRecorder(mixedStream, { mimeType: 'video/webm; codecs=vp9' });
-  } catch (e) {
-    try {
-      mediaRecorder = new MediaRecorder(mixedStream, { mimeType: 'video/webm; codecs=vp8' });
-    } catch (e2) {
-      mediaRecorder = new MediaRecorder(mixedStream, { mimeType: 'video/webm' });
+    showToast('Warning: Please do not share the current tab to prevent severe audio echo.', 'warning');
+
+    if (window.showSaveFilePicker) {
+      try {
+        recordingFileHandle = await window.showSaveFilePicker({
+          suggestedName: `Meeting-Recording-${new Date().toISOString()}.webm`,
+          types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
+        });
+        recordingWritableStream = await recordingFileHandle.createWritable();
+      } catch (err) {
+        showToast('Recording cancelled (no file selected).', 'warning');
+        return;
+      }
     }
+
+    let displayStream;
+    let mixedStream;
+    let audioContext;
+
+    if (state.screenSharing && state.localVideoTrack) {
+      const tracks = [state.localVideoTrack];
+      if (state.mixedAudioTrack) tracks.push(state.mixedAudioTrack);
+      mixedStream = new MediaStream(tracks);
+    } else {
+      displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: "browser" },
+        audio: true,
+        surfaceSwitching: "include",
+        preferCurrentTab: false
+      });
+
+      audioContext = new window.AudioContext();
+      const dest = audioContext.createMediaStreamDestination();
+      
+      if (displayStream.getAudioTracks().length > 0) {
+        recordingTabAudioSource = audioContext.createMediaStreamSource(displayStream);
+        recordingTabAudioSource.connect(dest);
+      }
+      const localMic = currentTrack();
+      if (localMic) {
+        recordingMicAudioSource = audioContext.createMediaStreamSource(new MediaStream([localMic]));
+        recordingMicAudioSource.connect(dest);
+      }
+
+      mixedStream = new MediaStream([
+        ...displayStream.getVideoTracks(),
+        ...dest.stream.getAudioTracks()
+      ]);
+      
+      displayStream.getVideoTracks()[0].onended = () => {
+        stopRecording();
+      };
+    }
+
+    state.recording = true;
+    recordedChunks = [];
+
+    mediaRecorder = new MediaRecorder(mixedStream, { mimeType: 'video/webm' });
+
+    mediaRecorder.ondataavailable = async (e) => {
+      if (e.data.size > 0) {
+        if (recordingWritableStream) {
+          try {
+            await recordingWritableStream.write(e.data);
+          } catch (writeError) {
+            console.error('File write failed, falling back to RAM:', writeError);
+            recordedChunks.push(e.data);
+          }
+        } else {
+          recordedChunks.push(e.data);
+        }
+      }
+    };
+
+    mediaRecorder.onstop = async () => {
+      if (recordingWritableStream) {
+        await recordingWritableStream.close();
+        recordingWritableStream = null;
+        recordingFileHandle = null;
+        showToast('Recording saved successfully.', 'success');
+      } else if (recordedChunks.length > 0) {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Meeting-Recording-${new Date().toISOString()}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        recordedChunks = [];
+      }
+      
+      if (!state.screenSharing && displayStream) {
+        mixedStream.getTracks().forEach(t => t.stop());
+        displayStream.getTracks().forEach(t => t.stop());
+      }
+
+      if (recordingTabAudioSource) {
+        recordingTabAudioSource.disconnect();
+        recordingTabAudioSource = null;
+      }
+      if (recordingMicAudioSource) {
+        recordingMicAudioSource.disconnect();
+        recordingMicAudioSource = null;
+      }
+
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close().catch(console.error);
+      }
+    };
+
+    mediaRecorder.start(1000);
+    
+    ui.recordBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
+    ui.recordBtn.classList.add('danger');
+    ui.recordBtn.classList.add('active');
+    showToast('Recording started.', 'info');
+
+  } catch (error) {
+    console.warn("Recording cancelled or failed:", error);
+    showToast('Recording was cancelled or is unsupported.', 'warning');
   }
-
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0) recordedChunks.push(e.data);
-  };
-
-  mediaRecorder.onstop = () => {
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `recording-${new Date().toISOString()}.webm`;
-    a.click();
-    showToast('Recording saved.', 'success');
-
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-    }, 2000);
-  };
-
-  mediaRecorder.start(1000);
-
-  ui.recordBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
-  ui.recordBtn.classList.add('danger');
-  ui.recordBtn.classList.add('active');
-  showToast('Recording started.', 'info');
 }
 
 function stopRecording() {
@@ -215,15 +287,6 @@ function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
   }
-
-  if (state.recordingPoll) {
-    clearTimeout(state.recordingPoll);
-    state.recordingPoll = null;
-  }
-
-  audioSources.forEach(s => s.disconnect());
-  audioSources.clear();
-  state.recordingDestination = null;
 
   ui.recordBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>`;
   ui.recordBtn.classList.remove('danger');
@@ -244,6 +307,7 @@ const ui = {
   usernameInput: document.getElementById('usernameInput'),
   roomInput: document.getElementById('roomInput'),
   passwordInput: document.getElementById('passwordInput'),
+  generateLinkBtn: document.getElementById('generateLinkBtn'),
   joinBtn: document.getElementById('joinBtn'),
   hangupBtn: document.getElementById('hangupBtn'),
   muteBtn: document.getElementById('muteBtn'),
@@ -340,6 +404,9 @@ function isUsableAudioTrack(track) {
 }
 
 function currentTrack() {
+  if (state.screenSharing && state.mixedAudioTrack) {
+    return state.mixedAudioTrack;
+  }
   const track = state.localStream ? state.localStream.getAudioTracks()[0] : null;
   return isUsableAudioTrack(track) ? track : null;
 }
@@ -443,7 +510,7 @@ function updateRetryButton() {
 
 function setChatStateFromPeers() {
   const hasOpenDataChannel = openDataChannelCount() > 0;
-  setChatEnabled(hasOpenDataChannel);
+  setChatEnabled(Boolean(state.roomId));
   ui.attachFileBtn.disabled = !state.roomId || !hasOpenDataChannel;
 }
 
@@ -531,6 +598,7 @@ function bindLocalAudioTrackEvents(track) {
 
   track.onended = () => {
     if (state.localStream?.getAudioTracks()[0] === track) {
+      clearLocalAudioAnalyser();
       applyLocalTracksToAllPeers();
       refreshMicUi();
       showToast('Microphone disconnected. You are still in the room without audio.', 'warning');
@@ -575,7 +643,8 @@ function setupAudioAnalyser(stream, id) {
     analyser.smoothingTimeConstant = 0.4;
     source.connect(analyser);
 
-    state.audioAnalysers.set(id, { analyser, source });
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    state.audioAnalysers.set(id, { analyser, source, dataArray });
 
     if (!speakerPollId) {
       pollActiveSpeakers();
@@ -585,7 +654,8 @@ function setupAudioAnalyser(stream, id) {
   }
 }
 
-function pollActiveSpeakers() {
+let lastPollTime = 0;
+function pollActiveSpeakers(timestamp) {
   if (state.audioAnalysers.size === 0) {
     speakerPollId = null;
     return;
@@ -593,8 +663,11 @@ function pollActiveSpeakers() {
 
   speakerPollId = requestAnimationFrame(pollActiveSpeakers);
 
-  state.audioAnalysers.forEach(({ analyser }, id) => {
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+  if (!timestamp) timestamp = performance.now();
+  if (timestamp - lastPollTime < 100) return;
+  lastPollTime = timestamp;
+
+  state.audioAnalysers.forEach(({ analyser, dataArray }, id) => {
     analyser.getByteFrequencyData(dataArray);
     let sum = 0;
     for (let i = 0; i < dataArray.length; i++) {
@@ -717,6 +790,12 @@ function updateLocalVideoPreview() {
 
   const avatarPlaceholder = wrapper.querySelector('.avatar-placeholder');
 
+  if (state.screenSharing) {
+    localVideoEl.style.transform = 'none';
+  } else {
+    localVideoEl.style.transform = 'scaleX(-1)';
+  }
+
   if (!videoTrack) {
     localVideoEl.srcObject = null;
     localVideoEl.style.display = 'none';
@@ -774,13 +853,26 @@ function clearChat() {
   activeBlobUrls = [];
 }
 
+function pruneOldChatMessages() {
+  while (ui.chatBox.children.length >= MAX_CHAT_MESSAGES) {
+    const oldest = ui.chatBox.firstElementChild;
+    const links = oldest.querySelectorAll('a');
+    links.forEach(a => {
+      if (a.href && a.href.startsWith('blob:')) {
+        URL.revokeObjectURL(a.href);
+        const index = activeBlobUrls.indexOf(a.href);
+        if (index > -1) activeBlobUrls.splice(index, 1);
+      }
+    });
+    oldest.remove();
+  }
+}
+
 function appendMessage(text, isSelf, senderName = '') {
   const placeholder = ui.chatBox.querySelector('.chat-empty');
   if (placeholder) placeholder.remove();
 
-  while (ui.chatBox.children.length >= MAX_CHAT_MESSAGES) {
-    ui.chatBox.firstElementChild.remove();
-  }
+  pruneOldChatMessages();
 
   const el = document.createElement('div');
   el.className = `chat-msg${isSelf ? ' self' : ''}`;
@@ -931,6 +1023,13 @@ function attachDataChannel(peerId, channel) {
     }
     setChatStateFromPeers();
     refreshRoomStatus();
+    
+    for (const [fileId, fileState] of state.incomingFiles.entries()) {
+      if (fileState.peerId === peerId) {
+        removeFileProgress(fileId);
+        state.incomingFiles.delete(fileId);
+      }
+    }
   };
 
   channel.onerror = () => {
@@ -943,8 +1042,10 @@ function attachDataChannel(peerId, channel) {
     if (typeof event.data === 'string') {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'chat') {
-          appendMessage(msg.text, false, peer.username || 'Anonymous');
+        if (msg.type === 'audio-state') {
+          handleMediaStateChange({ senderId: peerId, type: 'audio', enabled: msg.enabled });
+        } else if (msg.type === 'video-state') {
+          handleMediaStateChange({ senderId: peerId, type: 'video', enabled: msg.enabled });
         } else if (msg.type === 'file-meta') {
           const fileName = String(msg.name || 'received-file').slice(0, 120);
           const fileSize = Number(msg.size);
@@ -954,8 +1055,9 @@ function attachDataChannel(peerId, channel) {
             showToast('Incoming file was rejected because its metadata is invalid.', 'warning');
             return;
           }
-          state.incomingFiles.set(peerId, {
+          state.incomingFiles.set(fileId, {
             fileId,
+            peerId,
             metadata: { name: fileName, size: fileSize, fileType },
             chunks: [],
             receivedSize: 0
@@ -963,64 +1065,26 @@ function attachDataChannel(peerId, channel) {
           appendFileProgress(fileId, fileName, fileSize, false, peer.username || 'Anonymous');
           showToast(`Receiving file: ${fileName}...`, 'info');
         }
-        else if (msg.type === 'audio-state') {
-          peer.isAudioMuted = !msg.enabled;
-          const muteIcon = document.getElementById(`mute-icon-${peerId}`);
-          if (muteIcon) {
-            if (msg.enabled) muteIcon.classList.add('hidden');
-            else muteIcon.classList.remove('hidden');
-          }
-          const participantMic = document.getElementById(`participant-mic-${peerId}`);
-          if (participantMic) {
-            if (msg.enabled) {
-              participantMic.classList.remove('muted');
-              participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-            } else {
-              participantMic.classList.add('muted');
-              participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-            }
-          }
-        }
-        else if (msg.type === 'typing') {
-          const typingIndicator = document.getElementById('typingIndicator');
-          if (typingIndicator) {
-            typingIndicator.textContent = `${peer.username || 'Someone'} is typing...`;
-            typingIndicator.style.display = 'block';
-            clearTimeout(peer.typingTimeout);
-            peer.typingTimeout = setTimeout(() => {
-              typingIndicator.style.display = 'none';
-            }, 3000);
-          }
-        }
-        else if (msg.type === 'video-state') {
-          const videoEl = document.getElementById(`video-${peerId}`);
-          const wrapper = document.getElementById(`video-wrapper-${peerId}`);
-          if (videoEl && wrapper) {
-            const avatar = wrapper.querySelector('.avatar-placeholder');
-            if (msg.enabled) {
-              videoEl.style.opacity = '1';
-              if (avatar) avatar.style.display = 'none';
-            } else {
-              videoEl.style.opacity = '0';
-              if (avatar) avatar.style.display = 'block';
-            }
-          }
-        }
       } catch (e) {
-        appendMessage(String(event.data), false, peer.username || 'Anonymous');
+        console.warn('Failed to parse data channel message:', e);
       }
     } else if (event.data instanceof ArrayBuffer) {
-      const fileState = state.incomingFiles.get(peerId);
+      if (event.data.byteLength < 16) return;
+      const fileIdBytes = new Uint8Array(event.data, 0, 16);
+      const fileId = new TextDecoder().decode(fileIdBytes).trim();
+      const chunk = event.data.slice(16);
+
+      const fileState = state.incomingFiles.get(fileId);
       if (!fileState) return;
 
-      fileState.chunks.push(event.data);
-      fileState.receivedSize += event.data.byteLength;
+      fileState.chunks.push(chunk);
+      fileState.receivedSize += chunk.byteLength;
 
       updateFileProgress(fileState.fileId, fileState.receivedSize, fileState.metadata.size);
 
       if (fileState.receivedSize > MAX_FILE_SIZE || fileState.receivedSize > fileState.metadata.size + FILE_CHUNK_SIZE) {
         removeFileProgress(fileState.fileId);
-        state.incomingFiles.delete(peerId);
+        state.incomingFiles.delete(fileId);
         showToast('Incoming file was cancelled because it exceeded its declared size.', 'warning');
         return;
       }
@@ -1031,7 +1095,7 @@ function attachDataChannel(peerId, channel) {
         activeBlobUrls.push(url);
         removeFileProgress(fileState.fileId);
         appendFileMessage(fileState.metadata.name, url, fileState.metadata.size, false, peer.username || 'Anonymous');
-        state.incomingFiles.delete(peerId);
+        state.incomingFiles.delete(fileId);
         showToast(`File received: ${fileState.metadata.name}`, 'success');
       }
     }
@@ -1190,14 +1254,6 @@ function ensurePeer(peerId, providedUsername = null) {
       audioEl.srcObject = safeAudioStream;
       audioEl.play().catch(e => console.warn('Audio auto-play prevented:', e));
       setupAudioAnalyser(safeAudioStream, peerId);
-
-      if (state.recording && state.recordingDestination) {
-        try {
-          const source = state.audioContext.createMediaStreamSource(safeAudioStream);
-          source.connect(state.recordingDestination);
-          audioSources.set(peerId, source);
-        } catch (e) { }
-      }
     }
   };
 
@@ -1386,15 +1442,11 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
     }
   }
 
-  if (audioSources.has(peerId)) {
-    try {
-      audioSources.get(peerId).disconnect();
-    } catch (e) { }
-    audioSources.delete(peerId);
-  }
-
-  if (state.incomingFiles.has(peerId)) {
-    state.incomingFiles.delete(peerId);
+  for (const [fileId, fileState] of state.incomingFiles.entries()) {
+    if (fileState.peerId === peerId) {
+      removeFileProgress(fileId);
+      state.incomingFiles.delete(fileId);
+    }
   }
 
   if (!skipRefresh) {
@@ -1431,8 +1483,11 @@ function leaveRoom(options = {}) {
   unfocusVideo();
   clearAllPeers();
   stopLocalStream();
+  const localWrapper = document.getElementById('video-wrapper-local');
+  if (localWrapper) localWrapper.remove();
 
   state.roomId = '';
+  state.roomPassword = '';
   state.selectedDeviceId = '';
   state.videoEnabled = false;
   ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; ui.videoBtn.classList.remove('active');
@@ -1608,7 +1663,14 @@ async function joinRoom() {
 
   const roomId = normalizeRoomName(ui.roomInput.value);
   const username = ui.usernameInput.value.trim() || 'Anonymous';
-  const password = ui.passwordInput.value || '';
+  let password = ui.passwordInput.value || '';
+
+  if (!password) {
+    const array = new Uint8Array(16);
+    window.crypto.getRandomValues(array);
+    password = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+    ui.passwordInput.value = password;
+  }
 
   if (!roomId) {
     showToast('Enter a room ID.', 'error');
@@ -1638,8 +1700,11 @@ async function joinRoom() {
       exactDevice: Boolean(ui.deviceSelect.value),
       allowFallback: !ui.deviceSelect.value,
     });
-    const result = await requestRoomJoin({ roomId, username, password });
+    const hashedPassword = await hashPassword(password);
+    const result = await requestRoomJoin({ roomId, username, password: hashedPassword });
+    state.e2eeKey = await deriveChatKey(password, roomId);
 
+    state.roomPassword = password;
     state.roomId = result.room;
     setRoomChip(state.roomId);
     setMode('call');
@@ -1647,6 +1712,7 @@ async function joinRoom() {
     clearAllPeers();
     syncPeerRoster(result.roomPeers || result.peers || [], result.usernames || {});
     applyLocalTracksToAllPeers();
+    updateLocalVideoPreview();
 
     if (!currentTrack()) {
       showToast('Joined without microphone access. You can retry later.', 'warning');
@@ -1700,7 +1766,10 @@ async function restoreRoomAfterReconnect() {
   try {
     clearAllPeers();
     await waitForSocketConnect();
-    const result = await requestRoomJoin({ roomId: state.roomId, username: state.username, password: ui.passwordInput.value });
+    const currentPassword = state.roomPassword || ui.passwordInput.value || '';
+    const hashedPassword = await hashPassword(currentPassword);
+    const result = await requestRoomJoin({ roomId: state.roomId, username: state.username, password: hashedPassword });
+    state.e2eeKey = await deriveChatKey(currentPassword, state.roomId);
 
     syncPeerRoster(result.roomPeers || result.peers || [], result.usernames || {});
     applyLocalTracksToAllPeers();
@@ -1808,20 +1877,13 @@ function handleRemoteIce(data) {
 }
 
 function broadcastVideoState(enabled) {
-  const msgStr = JSON.stringify({ type: 'video-state', enabled: enabled });
-
-  peerEntries().forEach(([, peer]) => {
-    if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
-      try {
-        peer.dataChannel.send(msgStr);
-      } catch (error) {
-        console.warn('Failed to send video state:', error);
-      }
-    }
+  socket.emit('media-state-change', {
+    type: 'video',
+    enabled: enabled
   });
 }
 
-function sendChatMessage() {
+async function sendChatMessage() {
   const MAX_CHAT_LENGTH = 4000;
   const message = ui.chatInput.value.trim();
   if (!message) return;
@@ -1830,22 +1892,22 @@ function sendChatMessage() {
     return;
   }
 
-  const openChannels = peerEntries()
-    .map(([, peer]) => peer.dataChannel)
-    .filter((channel) => channel && channel.readyState === 'open');
+  const payload = {
+    type: 'chat',
+    text: message,
+    username: state.username || 'You'
+  };
 
-  if (!openChannels.length) return;
-
-  const msgObj = { type: 'chat', text: message };
-  const msgStr = JSON.stringify(msgObj);
-
-  openChannels.forEach((channel) => {
-    try {
-      channel.send(msgStr);
-    } catch (error) {
-      console.error('Failed to send chat message:', error);
-    }
-  });
+  if (state.e2eeKey) {
+    const encrypted = await encryptMessage(state.e2eeKey, JSON.stringify(payload));
+    socket.emit('room-chat-message', {
+      encrypted: true,
+      payload: encrypted.payload,
+      iv: encrypted.iv
+    });
+  } else {
+    socket.emit('room-chat-message', payload);
+  }
 
   appendMessage(message, true, state.username || 'You');
   ui.chatInput.value = '';
@@ -1855,9 +1917,7 @@ function appendFileProgress(fileId, name, size, isSelf, senderName = '') {
   const placeholder = ui.chatBox.querySelector('.chat-empty');
   if (placeholder) placeholder.remove();
 
-  while (ui.chatBox.children.length >= MAX_CHAT_MESSAGES) {
-    ui.chatBox.firstElementChild.remove();
-  }
+  pruneOldChatMessages();
 
   const el = document.createElement('div');
   el.id = `progress-${fileId}`;
@@ -1918,9 +1978,7 @@ function appendFileMessage(name, url, size, isSelf, senderName = '') {
   const placeholder = ui.chatBox.querySelector('.chat-empty');
   if (placeholder) placeholder.remove();
 
-  while (ui.chatBox.children.length >= MAX_CHAT_MESSAGES) {
-    ui.chatBox.firstElementChild.remove();
-  }
+  pruneOldChatMessages();
 
   const el = document.createElement('div');
   el.className = `chat-msg${isSelf ? ' self' : ''}`;
@@ -1947,69 +2005,44 @@ function appendFileMessage(name, url, size, isSelf, senderName = '') {
   ui.chatBox.scrollTop = ui.chatBox.scrollHeight;
 }
 
-// Utility function to natively mirror a video track
-function mirrorVideoTrack(track) {
-  const videoEl = document.createElement('video');
-  videoEl.srcObject = new MediaStream([track]);
-  videoEl.autoplay = true;
-  videoEl.playsInline = true;
-
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-
-  videoEl.onloadedmetadata = () => {
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    videoEl.play().catch(() => { });
-  };
-
-  let animationId;
-  function drawFrame() {
-    if (videoEl.readyState >= 2 && canvas.width > 0) {
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoEl, -canvas.width, 0, canvas.width, canvas.height);
-      ctx.restore();
-    }
-    animationId = requestAnimationFrame(drawFrame);
-  }
-  animationId = requestAnimationFrame(drawFrame);
-
-  const canvasStream = canvas.captureStream(30);
-  const mirroredTrack = canvasStream.getVideoTracks()[0];
-
-  const originalStop = mirroredTrack.stop.bind(mirroredTrack);
-  mirroredTrack.stop = () => {
-    cancelAnimationFrame(animationId);
-    track.stop();
-    originalStop();
-  };
-
-  return mirroredTrack;
-}
+// Utility function to natively mirror a video track removed for efficiency
+// CSS transform: scaleX(-1) is now used instead.
 
 let isTogglingVideo = false;
 
-async function toggleVideo() {
-  if (state.screenSharing) {
-    showToast('Cannot enable video while screen sharing is active.', 'warning');
-    return;
-  }
+function turnOffVideo() {
+  if (!state.videoEnabled) return;
+  
+  const previousVideoTrack = currentVideoTrack();
+  state.videoEnabled = false;
+  rebuildLocalStream(currentTrack(), null);
+  if (previousVideoTrack) previousVideoTrack.stop();
+  updateLocalVideoPreview();
+  
+  ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; 
+  ui.videoBtn.classList.remove('active');
+  showToast('Camera turned off.', 'info');
+  broadcastVideoState(false);
+}
 
+async function toggleVideo() {
   if (isTogglingVideo) return;
   isTogglingVideo = true;
-
-  const nextVideoEnabled = !state.videoEnabled;
   ui.videoBtn.disabled = true;
 
   try {
-    if (nextVideoEnabled) {
+    if (state.videoEnabled) {
+      turnOffVideo();
+    } else {
+      if (state.screenSharing) {
+        stopScreenShare();
+      }
+
       const cameraStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: getVideoConstraints(),
       });
       let videoTrack = cameraStream.getVideoTracks()[0] || null;
-      if (videoTrack) videoTrack = mirrorVideoTrack(videoTrack);
       if (!videoTrack || videoTrack.readyState !== 'live') {
         stopStream(cameraStream);
         throw new Error('No live camera track was returned.');
@@ -2024,37 +2057,26 @@ async function toggleVideo() {
 
       videoTrack.onended = () => {
         if (currentVideoTrack() === videoTrack) {
-          state.videoEnabled = false;
-          rebuildLocalStream(currentTrack(), null);
-          updateLocalVideoPreview();
+          turnOffVideo();
           applyLocalTracksToAllPeers();
-          ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; ui.videoBtn.classList.remove('active');
-          showToast('Camera stopped.', 'info');
         }
       };
 
       updateLocalVideoPreview();
-      ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`; ui.videoBtn.classList.add('active');
+      ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`; 
+      ui.videoBtn.classList.add('active');
       showToast('Camera turned on.', 'success');
       broadcastVideoState(true);
-    } else {
-      const previousVideoTrack = currentVideoTrack();
-      state.videoEnabled = false;
-      rebuildLocalStream(currentTrack(), null);
-      if (previousVideoTrack) previousVideoTrack.stop();
-      updateLocalVideoPreview();
-      ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; ui.videoBtn.classList.remove('active');
-      showToast('Camera turned off.', 'info');
-      broadcastVideoState(false);
     }
 
     applyLocalTracksToAllPeers();
     refreshRoomStatus();
   } catch (error) {
     console.error('Camera toggle failed:', error);
-    state.videoEnabled = !nextVideoEnabled;
-    ui.videoBtn.innerHTML = state.videoEnabled ? '<i class="fa-solid fa-video"></i>' : '<i class="fa-solid fa-video-slash"></i>'; if (state.videoEnabled) ui.videoBtn.classList.add('active'); else ui.videoBtn.classList.remove('active');
-    showToast('Camera access failed. Check browser permissions or another app using the camera.', 'error');
+    state.videoEnabled = false;
+    ui.videoBtn.innerHTML = '<i class="fa-solid fa-video-slash"></i>'; 
+    ui.videoBtn.classList.remove('active');
+    showToast('Camera access failed. Check permissions.', 'error');
   } finally {
     isTogglingVideo = false;
     ui.videoBtn.disabled = false;
@@ -2062,24 +2084,58 @@ async function toggleVideo() {
 }
 
 async function toggleScreenShare() {
-  if (!state.screenSharing) {
+  if (state.screenSharing) {
+    stopScreenShare();
+  } else {
+    if (state.videoEnabled) {
+      turnOffVideo();
+      applyLocalTracksToAllPeers();
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
       showToast('Screen sharing is not supported on this device/browser.', 'error');
       return;
     }
+    
     try {
+      ui.screenShareBtn.disabled = true;
+      showToast('Warning: Please do not share the current tab to prevent severe audio echo.', 'warning');
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
           frameRate: { ideal: 20, max: 20 }
         },
-        audio: true
+        audio: true,
+        surfaceSwitching: "include",
+        preferCurrentTab: false
       });
       state.screenSharing = true;
       state.localVideoTrack = displayStream.getVideoTracks()[0];
       if (state.localVideoTrack) {
         state.localVideoTrack.contentHint = 'detail';
+      }
+
+      const tabAudioTrack = displayStream.getAudioTracks()[0];
+      if (tabAudioTrack) {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        state.screenAudioContext = new AudioContextCtor({ latencyHint: 'interactive' });
+        const dest = state.screenAudioContext.createMediaStreamDestination();
+        
+        // Retain references to prevent Chrome Garbage Collection from dropping audio
+        state.tabAudioSource = state.screenAudioContext.createMediaStreamSource(new MediaStream([tabAudioTrack]));
+        state.tabAudioSource.connect(dest);
+        
+        const localMic = state.localStream ? state.localStream.getAudioTracks()[0] : null;
+        if (localMic && isUsableAudioTrack(localMic)) {
+          state.micAudioSource = state.screenAudioContext.createMediaStreamSource(new MediaStream([localMic]));
+          state.micAudioSource.connect(dest);
+        }
+        
+        state.mixedAudioTrack = dest.stream.getAudioTracks()[0];
+        if (state.mixedAudioTrack) {
+          state.mixedAudioTrack.enabled = localMic ? localMic.enabled : true;
+        }
       }
 
       state.localVideoTrack.onended = () => {
@@ -2090,17 +2146,15 @@ async function toggleScreenShare() {
       ui.screenShareBtn.classList.add('danger');
       ui.screenShareBtn.classList.add('active');
 
-      ui.videoBtn.disabled = true;
-
       updateLocalVideoPreview();
       applyLocalTracksToAllPeers();
       broadcastVideoState(true);
     } catch (err) {
       console.warn("Screen share failed or cancelled", err);
       showToast('Screen sharing failed or was cancelled.', 'warning');
+    } finally {
+      ui.screenShareBtn.disabled = false;
     }
-  } else {
-    stopScreenShare();
   }
 }
 
@@ -2111,11 +2165,29 @@ function stopScreenShare() {
     state.localVideoTrack.stop();
     state.localVideoTrack = null;
   }
+  if (state.mixedAudioTrack) {
+    state.mixedAudioTrack.stop();
+    state.mixedAudioTrack = null;
+  }
+  if (state.tabAudioSource) {
+    state.tabAudioSource.disconnect();
+    state.tabAudioSource = null;
+  }
+  if (state.micAudioSource) {
+    state.micAudioSource.disconnect();
+    state.micAudioSource = null;
+  }
+  if (state.screenAudioContext) {
+    if (state.screenAudioContext.state !== 'closed') {
+      state.screenAudioContext.close().catch(() => {});
+    }
+    state.screenAudioContext = null;
+  }
 
-  ui.screenShareBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>`; ui.screenShareBtn.classList.remove('active');
-  ui.screenShareBtn.classList.remove('btn-danger');
-  ui.screenShareBtn.classList.add('btn-secondary');
-  ui.videoBtn.disabled = false;
+  ui.screenShareBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>`; 
+  ui.screenShareBtn.classList.remove('active');
+  ui.screenShareBtn.classList.remove('danger');
+  ui.screenShareBtn.classList.remove('btn-danger'); // to handle both potential classes used historically
 
   updateLocalVideoPreview();
   applyLocalTracksToAllPeers();
@@ -2131,15 +2203,19 @@ function toggleMute() {
   }
 
   track.enabled = !track.enabled;
+
+  if (track === state.mixedAudioTrack && state.localStream) {
+    const mic = state.localStream.getAudioTracks()[0];
+    if (mic) mic.enabled = track.enabled;
+  }
+
   updateMuteButton();
   refreshRoomStatus();
   showToast(track.enabled ? 'Microphone unmuted.' : 'Microphone muted.', 'info', 1800);
 
-  const msgStr = JSON.stringify({ type: 'audio-state', enabled: track.enabled });
-  peerEntries().forEach(([, peer]) => {
-    if (peer.dataChannel?.readyState === 'open') {
-      try { peer.dataChannel.send(msgStr); } catch (e) { }
-    }
+  socket.emit('media-state-change', {
+    type: 'audio',
+    enabled: track.enabled
   });
 }
 
@@ -2172,9 +2248,13 @@ async function retryMicAccess() {
 async function copyInviteLink() {
   const url = new URL(window.location.href);
   const room = state.roomId || normalizeRoomName(ui.roomInput.value);
-  if (room) {
-    url.searchParams.set('room', room);
-  }
+  const pwd = ui.passwordInput.value;
+  
+  url.search = ''; 
+  const hashParams = new URLSearchParams();
+  if (room) hashParams.set('room', room);
+  if (pwd) hashParams.set('pwd', pwd);
+  url.hash = hashParams.toString();
 
   try {
     await navigator.clipboard.writeText(url.toString());
@@ -2200,10 +2280,17 @@ async function copyInviteLink() {
 }
 
 function initializeFromQuery() {
-  const params = new URLSearchParams(window.location.search);
-  const roomFromUrl = params.get('room');
+  const hashParams = new URLSearchParams(window.location.hash.substring(1));
+  const queryParams = new URLSearchParams(window.location.search);
+  
+  const roomFromUrl = hashParams.get('room') || queryParams.get('room');
+  const pwdFromUrl = hashParams.get('pwd') || queryParams.get('pwd');
+  
   if (roomFromUrl) {
     ui.roomInput.value = roomFromUrl;
+  }
+  if (pwdFromUrl) {
+    ui.passwordInput.value = pwdFromUrl;
   }
 }
 
@@ -2255,7 +2342,118 @@ socket.on('webrtc-offer', handleRemoteOffer);
 socket.on('webrtc-answer', handleRemoteAnswer);
 socket.on('ice-candidate', handleRemoteIce);
 
+socket.on('room-chat-message', async (data) => {
+  if (data && data.encrypted) {
+    if (!state.e2eeKey) {
+      return; // Drop message if we have no key
+    }
+    
+    let decryptedText = null;
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        decryptedText = await decryptMessage(state.e2eeKey, data.payload, data.iv);
+        break;
+      } catch (e) {
+        attempts++;
+        if (attempts < 3) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+    }
+    
+    if (decryptedText) {
+      try {
+        const msg = JSON.parse(decryptedText);
+        appendMessage(msg.text, false, msg.username || 'Anonymous');
+      } catch (e) {
+        // Drop malformed JSON
+      }
+    } else {
+      appendMessage(`[Encrypted Payload] ${data.payload}`, false, 'Unknown (Decryption Failed)');
+    }
+  } else if (data && data.text) {
+    appendMessage(data.text, false, data.username || 'Anonymous');
+  }
+});
+
+function handleMediaStateChange(data) {
+  if (!data || !data.senderId || !data.type) return;
+  const peerId = data.senderId;
+  const peer = state.peers.get(peerId);
+  if (!peer) return;
+
+  if (data.type === 'audio') {
+    peer.isAudioMuted = !data.enabled;
+    const muteIcon = document.getElementById(`mute-icon-${peerId}`);
+    if (muteIcon) {
+      if (data.enabled) muteIcon.classList.add('hidden');
+      else muteIcon.classList.remove('hidden');
+    }
+    const participantMic = document.getElementById(`participant-mic-${peerId}`);
+    if (participantMic) {
+      if (data.enabled) {
+        participantMic.classList.remove('muted');
+        participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+      } else {
+        participantMic.classList.add('muted');
+        participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+      }
+    }
+  } else if (data.type === 'video') {
+    const videoEl = document.getElementById(`video-${peerId}`);
+    const wrapper = document.getElementById(`video-wrapper-${peerId}`);
+    if (videoEl && wrapper) {
+      const avatar = wrapper.querySelector('.avatar-placeholder');
+      if (data.enabled) {
+        videoEl.style.opacity = '1';
+        if (avatar) avatar.style.display = 'none';
+      } else {
+        videoEl.style.opacity = '0';
+        if (avatar) avatar.style.display = 'block';
+      }
+    }
+  }
+}
+
+socket.on('media-state-change', handleMediaStateChange);
+
+socket.on('typing', (data) => {
+  if (!data || !data.senderId) return;
+  const peerId = data.senderId;
+  const peer = state.peers.get(peerId);
+  if (!peer) return;
+
+  const typingIndicator = document.getElementById('typingIndicator');
+  if (typingIndicator) {
+    typingIndicator.textContent = `${data.username || peer.username || 'Someone'} is typing...`;
+    typingIndicator.style.display = 'block';
+    clearTimeout(peer.typingTimeout);
+    peer.typingTimeout = setTimeout(() => {
+      typingIndicator.style.display = 'none';
+    }, 3000);
+  }
+});
+
 ui.joinBtn.addEventListener('click', joinRoom);
+if (ui.generateLinkBtn) {
+  ui.generateLinkBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const genId = (len) => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+      const array = new Uint32Array(len);
+      window.crypto.getRandomValues(array);
+      let result = '';
+      for (let i = 0; i < len; i++) {
+        result += chars[array[i] % chars.length];
+      }
+      return result;
+    };
+    ui.roomInput.value = genId(16);
+    ui.passwordInput.value = genId(16);
+    showToast('Secure credentials generated!', 'success');
+  });
+}
 ui.hangupBtn.addEventListener('click', () => leaveRoom({ keepRoomInput: true }));
 ui.muteBtn.addEventListener('click', toggleMute);
 ui.videoBtn.addEventListener('click', toggleVideo);
@@ -2303,9 +2501,15 @@ ui.fileInput.addEventListener('change', () => {
   const reader = new FileReader();
   reader.onload = (e) => {
     const chunk = e.target.result;
+    const fileIdStr = fileId.padEnd(16, ' ');
+    const fileIdBytes = new TextEncoder().encode(fileIdStr);
+    const chunkWithHeader = new Uint8Array(16 + chunk.byteLength);
+    chunkWithHeader.set(fileIdBytes, 0);
+    chunkWithHeader.set(new Uint8Array(chunk), 16);
+
     openChannels.forEach(channel => {
       if (channel.readyState === 'open') {
-        channel.send(chunk);
+        channel.send(chunkWithHeader.buffer);
       }
     });
     offset += chunk.byteLength;
@@ -2333,15 +2537,24 @@ ui.fileInput.addEventListener('change', () => {
       return;
     }
 
-    const congestedChannel = activeChannels.find(c => c.bufferedAmount > DATA_CHANNEL_HIGH_WATER);
-    if (congestedChannel) {
-      const resumeTransfer = () => {
-        congestedChannel.onbufferedamountlow = null;
-        congestedChannel.removeEventListener('close', resumeTransfer);
-        readSlice(o);
+    const congestedChannels = activeChannels.filter(c => c.bufferedAmount > DATA_CHANNEL_HIGH_WATER);
+    if (congestedChannels.length > 0) {
+      let resolvedCount = 0;
+      const onChannelReady = () => {
+        resolvedCount++;
+        if (resolvedCount === congestedChannels.length) {
+          readSlice(o);
+        }
       };
-      congestedChannel.onbufferedamountlow = resumeTransfer;
-      congestedChannel.addEventListener('close', resumeTransfer, { once: true });
+      congestedChannels.forEach(c => {
+        const resumeTransfer = () => {
+          c.onbufferedamountlow = null;
+          c.removeEventListener('close', resumeTransfer);
+          onChannelReady();
+        };
+        c.onbufferedamountlow = resumeTransfer;
+        c.addEventListener('close', resumeTransfer, { once: true });
+      });
       return;
     }
 
@@ -2357,6 +2570,15 @@ ui.chatInput.addEventListener('keydown', (event) => {
     event.preventDefault();
     sendChatMessage();
   }
+});
+
+let typingTimer = null;
+ui.chatInput.addEventListener('input', () => {
+  if (typingTimer) return;
+  socket.emit('typing', { username: state.username || 'You' });
+  typingTimer = setTimeout(() => {
+    typingTimer = null;
+  }, 2000);
 });
 const midCallDeviceSelect = document.getElementById('midCallDeviceSelect');
 if (midCallDeviceSelect) {
@@ -2380,7 +2602,6 @@ if (midCallCameraSelect) {
         });
         let videoTrack = cameraStream.getVideoTracks()[0] || null;
         if (videoTrack) {
-          videoTrack = mirrorVideoTrack(videoTrack);
           const previousVideoTrack = currentVideoTrack();
           rebuildLocalStream(currentTrack(), videoTrack);
           updateLocalVideoPreview();
@@ -2496,7 +2717,9 @@ document.getElementById('tabParticipants').addEventListener('click', (e) => {
 const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
 if (toggleSidebarBtn) {
   toggleSidebarBtn.addEventListener('click', () => {
-    document.getElementById('sidePanel').classList.toggle('collapsed');
+    const panel = document.getElementById('sidePanel');
+    panel.classList.toggle('collapsed');
+    document.body.classList.toggle('sidebar-open', !panel.classList.contains('collapsed'));
   });
 }
 
@@ -2504,5 +2727,6 @@ const closeSidebarBtnMobile = document.getElementById('closeSidebarBtnMobile');
 if (closeSidebarBtnMobile) {
   closeSidebarBtnMobile.addEventListener('click', () => {
     document.getElementById('sidePanel').classList.add('collapsed');
+    document.body.classList.remove('sidebar-open');
   });
 }

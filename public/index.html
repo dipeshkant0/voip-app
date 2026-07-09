@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="manifest" href="/manifest.json">
@@ -9,7 +10,9 @@
   <title>CallMee</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     :root {
@@ -36,7 +39,9 @@
       --font: 'Outfit', 'Inter', system-ui, sans-serif;
     }
 
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -47,7 +52,12 @@
     }
 
     /* Typography */
-    h1, h2, h3 { letter-spacing: -0.02em; font-weight: 700; }
+    h1,
+    h2,
+    h3 {
+      letter-spacing: -0.02em;
+      font-weight: 700;
+    }
 
     #roomView {
       display: flex;
@@ -56,7 +66,7 @@
       justify-content: center;
       min-height: 100vh;
       background: radial-gradient(circle at 15% 15%, rgba(79, 70, 229, 0.15), transparent 40%),
-                  radial-gradient(circle at 85% 85%, rgba(16, 185, 129, 0.1), transparent 40%);
+        radial-gradient(circle at 85% 85%, rgba(16, 185, 129, 0.1), transparent 40%);
       position: relative;
     }
 
@@ -67,7 +77,7 @@
       background: var(--surface);
       border: 1px solid var(--stroke);
       backdrop-filter: blur(24px);
-      box-shadow: 0 32px 64px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
       display: flex;
       flex-direction: column;
       gap: 24px;
@@ -75,16 +85,20 @@
       z-index: 10;
     }
 
-    .join-card h1 { 
-      margin: 0; 
-      font-size: 2.5rem; 
-      font-weight: 800; 
+    .join-card h1 {
+      margin: 0;
+      font-size: 2.5rem;
+      font-weight: 800;
       background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    
-    .join-card p { margin: 0; color: var(--muted); font-size: 1.05rem; }
+
+    .join-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
 
     .input-group {
       display: flex;
@@ -92,24 +106,28 @@
       gap: 16px;
     }
 
-    input, select {
+    input,
+    select {
       width: 100%;
       padding: 16px;
       border-radius: var(--radius-md);
       border: 1px solid var(--stroke);
-      background: rgba(0,0,0,0.3);
+      background: rgba(0, 0, 0, 0.3);
       color: var(--text);
       font-size: 1rem;
       outline: none;
       transition: all 0.2s ease;
       font-family: inherit;
     }
-    
-    input::placeholder { color: #555; }
-    
-    input:focus, select:focus { 
-      border-color: var(--accent); 
-      background: rgba(0,0,0,0.5);
+
+    input::placeholder {
+      color: #555;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--accent);
+      background: rgba(0, 0, 0, 0.5);
       box-shadow: 0 0 0 4px var(--accent-glow);
     }
 
@@ -128,12 +146,17 @@
       justify-content: center;
       gap: 8px;
     }
-    .btn-primary:hover:not(:disabled) { 
+
+    .btn-primary:hover:not(:disabled) {
       transform: translateY(-2px);
       background: var(--accent-hover);
       box-shadow: 0 8px 24px var(--accent-glow);
     }
-    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
 
     .btn-secondary {
       background: transparent;
@@ -146,6 +169,7 @@
       cursor: pointer;
       transition: all 0.2s ease;
     }
+
     .btn-secondary:hover {
       background: var(--surface-hover);
       color: var(--text);
@@ -161,18 +185,24 @@
       font-size: 0.85rem;
       width: 100%;
     }
-    
+
     .app-footer a {
       color: var(--muted);
       text-decoration: none;
       transition: color 0.2s;
     }
-    .app-footer a:hover { color: var(--text); }
+
+    .app-footer a:hover {
+      color: var(--text);
+    }
 
     /* Modal Styles */
     .modal-overlay {
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
       background: rgba(0, 0, 0, 0.6);
       backdrop-filter: blur(8px);
       display: flex;
@@ -183,7 +213,7 @@
       pointer-events: none;
       transition: opacity 0.3s ease;
     }
-    
+
     .modal-overlay.active {
       opacity: 1;
       pointer-events: auto;
@@ -197,11 +227,11 @@
       max-height: 85vh;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
       transform: translateY(20px) scale(0.95);
       transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    
+
     .modal-overlay.active .modal-content {
       transform: translateY(0) scale(1);
     }
@@ -213,9 +243,12 @@
       align-items: center;
       justify-content: space-between;
     }
-    
-    .modal-header h2 { margin: 0; font-size: 1.25rem; }
-    
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 1.25rem;
+    }
+
     .modal-close {
       background: transparent;
       border: none;
@@ -225,7 +258,10 @@
       padding: 4px;
       transition: color 0.2s;
     }
-    .modal-close:hover { color: var(--text); }
+
+    .modal-close:hover {
+      color: var(--text);
+    }
 
     .modal-body {
       padding: 24px;
@@ -234,11 +270,26 @@
       font-size: 0.95rem;
       line-height: 1.6;
     }
-    
-    .modal-body h3 { color: var(--text); margin-top: 0; margin-bottom: 12px; font-size: 1.1rem; }
-    .modal-body ul { padding-left: 20px; margin-bottom: 24px; }
-    .modal-body li { margin-bottom: 8px; }
-    .modal-body p { margin-bottom: 16px; }
+
+    .modal-body h3 {
+      color: var(--text);
+      margin-top: 0;
+      margin-bottom: 12px;
+      font-size: 1.1rem;
+    }
+
+    .modal-body ul {
+      padding-left: 20px;
+      margin-bottom: 24px;
+    }
+
+    .modal-body li {
+      margin-bottom: 8px;
+    }
+
+    .modal-body p {
+      margin-bottom: 16px;
+    }
 
     /* Call View overrides */
     #callView {
@@ -272,9 +323,19 @@
       z-index: 10;
     }
 
-    .room-info { display: flex; align-items: center; gap: 12px; }
-    
-    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+    .room-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--warning);
+      box-shadow: 0 0 8px var(--warning);
+    }
 
     #video-grid {
       flex: 1;
@@ -284,7 +345,7 @@
       align-content: center;
       justify-content: center;
       overflow: hidden;
-      padding-bottom: 80px; 
+      padding-bottom: 80px;
       position: relative;
     }
 
@@ -301,21 +362,30 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
       transition: all 0.35s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    
-    .video-wrapper video { width: 100%; height: 100%; object-fit: contain; }
-    
+
+    .video-wrapper video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
     .video-wrapper.active-speaker {
       border: 2px solid var(--accent);
       box-shadow: 0 0 20px var(--accent-glow);
     }
-    
+
     .video-wrapper.focused {
       position: absolute;
-      top: 0; left: 0; right: 0; bottom: 80px;
-      width: 100%; height: calc(100% - 80px); max-height: 100%;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 80px;
+      width: 100%;
+      height: calc(100% - 80px);
+      max-height: 100%;
       z-index: 50;
       border-radius: var(--radius-lg);
       margin: 0;
@@ -324,200 +394,522 @@
 
     .unpin-btn {
       position: absolute;
-      top: 16px; right: 16px;
+      top: 16px;
+      right: 16px;
       background: rgba(0, 0, 0, 0.5);
       border: 1px solid var(--stroke-light);
       border-radius: 50%;
-      width: 40px; height: 40px;
-      display: none; align-items: center; justify-content: center;
-      color: white; cursor: pointer; backdrop-filter: blur(8px);
-      z-index: 60; transition: all 0.2s;
+      width: 40px;
+      height: 40px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      z-index: 60;
+      transition: all 0.2s;
     }
-    .unpin-btn:hover { background: var(--danger); border-color: var(--danger); transform: scale(1.05); }
-    .video-wrapper.focused .unpin-btn { display: flex; }
+
+    .unpin-btn:hover {
+      background: var(--danger);
+      border-color: var(--danger);
+      transform: scale(1.05);
+    }
+
+    .video-wrapper.focused .unpin-btn {
+      display: flex;
+    }
 
     .floating-controls {
       position: absolute;
-      bottom: 24px; left: 50%;
+      bottom: 24px;
+      left: 50%;
       transform: translateX(-50%);
-      display: flex; gap: 12px;
+      display: flex;
+      gap: 12px;
       padding: 12px 20px;
       background: rgba(15, 15, 15, 0.7);
       border: 1px solid var(--stroke);
       border-radius: 999px;
       backdrop-filter: blur(20px);
       z-index: 20;
-      box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
     }
 
     .control-btn {
-      width: 50px; height: 50px;
-      border-radius: 50%; border: none;
-      background: rgba(255,255,255,0.08);
-      color: white; cursor: pointer;
-      display: inline-flex; align-items: center; justify-content: center;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255, 255, 255, 0.08);
+      color: white;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    .control-btn:hover:not(:disabled) { 
-      background: rgba(255,255,255,0.15); 
-      transform: translateY(-2px); 
+
+    .control-btn:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px);
     }
-    .control-btn.active { background: white; color: black; }
-    .control-btn.danger { background: var(--danger); }
-    .control-btn.danger:hover:not(:disabled) { background: var(--danger-hover); }
-    .control-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
+
+    .control-btn.active {
+      background: white;
+      color: black;
+    }
+
+    .control-btn.danger {
+      background: var(--danger);
+    }
+
+    .control-btn.danger:hover:not(:disabled) {
+      background: var(--danger-hover);
+    }
+
+    .control-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      transform: none;
+    }
 
     .sidebar {
       width: 380px;
       background: rgba(15, 15, 15, 0.8);
       backdrop-filter: blur(20px);
       border-left: 1px solid var(--stroke);
-      display: flex; flex-direction: column;
+      display: flex;
+      flex-direction: column;
       transition: width 0.4s cubic-bezier(0.25, 1, 0.5, 1);
-      overflow: hidden; z-index: 100;
+      overflow: hidden;
+      z-index: 100;
     }
-    .sidebar.collapsed { width: 0; border: none; }
-    .sidebar-tabs, .sidebar-content { width: 380px; transition: opacity 0.3s ease; }
-    .sidebar.collapsed .sidebar-tabs, .sidebar.collapsed .sidebar-content { opacity: 0; pointer-events: none; }
 
-    .sidebar-tabs { display: flex; border-bottom: 1px solid var(--stroke); background: rgba(0,0,0,0.2); }
+    .sidebar.collapsed {
+      width: 0;
+      border: none;
+    }
+
+    .sidebar-tabs,
+    .sidebar-content {
+      width: 380px;
+      transition: opacity 0.3s ease;
+    }
+
+    .sidebar.collapsed .sidebar-tabs,
+    .sidebar.collapsed .sidebar-content {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .sidebar-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--stroke);
+      background: rgba(0, 0, 0, 0.2);
+    }
+
     .tab-btn {
-      flex: 1; background: transparent; border: none; color: var(--muted);
-      padding: 18px; font-weight: 600; cursor: pointer; transition: color 0.2s;
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      padding: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 0.2s;
     }
-    .tab-btn.active { color: var(--text); border-bottom: 2px solid var(--accent); }
-    
+
+    .tab-btn.active {
+      color: var(--text);
+      border-bottom: 2px solid var(--accent);
+    }
+
     .close-sidebar-btn {
-      display: none; flex: 0 0 60px; color: var(--muted);
-      background: transparent; border-left: 1px solid var(--stroke);
-      font-size: 1.25rem; cursor: pointer;
+      display: none;
+      flex: 0 0 60px;
+      color: var(--muted);
+      background: transparent;
+      border-left: 1px solid var(--stroke);
+      font-size: 1.25rem;
+      cursor: pointer;
     }
-    .close-sidebar-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+
+    .close-sidebar-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+    }
 
     .sidebar-content {
-      flex: 1; overflow-y: auto; padding: 20px;
-      display: flex; flex-direction: column; gap: 12px;
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
     .participant-item {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 12px 16px; background: rgba(255,255,255,0.03);
-      border-radius: var(--radius-md); border: 1px solid var(--stroke);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--stroke);
       transition: all 0.2s;
     }
-    .participant-item:hover { background: rgba(255,255,255,0.06); }
-    .participant-item.active-speaker { border-color: var(--accent); background: rgba(79, 70, 229, 0.1); }
-    
-    .participant-meta { display: flex; flex-direction: column; }
-    .participant-name { font-weight: 600; font-size: 0.95rem; color: var(--text); }
-    .participant-status { font-size: 0.8rem; color: var(--muted); }
-    
-    .mic-icon { color: var(--muted); font-size: 0.9rem; transition: color 0.2s; }
-    .mic-icon:not(.muted) { color: var(--success); }
-    .mic-icon.muted { color: var(--danger); }
-    
-    #chatBox { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 10px; }
+
+    .participant-item:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .participant-item.active-speaker {
+      border-color: var(--accent);
+      background: rgba(79, 70, 229, 0.1);
+    }
+
+    .participant-meta {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .participant-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--text);
+    }
+
+    .participant-status {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .mic-icon {
+      color: var(--muted);
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+
+    .mic-icon:not(.muted) {
+      color: var(--success);
+    }
+
+    .mic-icon.muted {
+      color: var(--danger);
+    }
+
+    #chatBox {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-bottom: 10px;
+    }
+
     .chat-msg {
-      background: rgba(255,255,255,0.05); padding: 12px 16px;
-      border-radius: var(--radius-md); max-width: 90%; word-wrap: break-word;
-      font-size: 0.95rem; border: 1px solid var(--stroke);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+      max-width: 90%;
+      word-wrap: break-word;
+      font-size: 0.95rem;
+      border: 1px solid var(--stroke);
       animation: fadeIn 0.3s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    .chat-msg.self { align-self: flex-end; background: var(--accent); color: white; border: none; }
-    
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    .chat-empty { text-align: center; color: #555; font-size: 0.95rem; margin: auto; }
-    
-    .chat-input-row { display: flex; gap: 10px; padding: 16px 20px; background: rgba(0,0,0,0.2); border-top: 1px solid var(--stroke); }
-    
-    .btn-icon {
-      background: rgba(255,255,255,0.05); border: 1px solid var(--stroke); color: var(--muted);
-      border-radius: var(--radius-sm); width: 48px; height: 48px; cursor: pointer;
-      display: grid; place-items: center; transition: all 0.2s;
+
+    .chat-msg.self {
+      align-self: flex-end;
+      background: var(--accent);
+      color: white;
+      border: none;
     }
-    .btn-icon:hover:not(:disabled) { background: rgba(255,255,255,0.1); color: var(--text); }
-    .btn-icon:disabled { opacity: 0.5; }
-    
-    #chatInput { padding: 12px 16px; border-radius: var(--radius-md); }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .chat-empty {
+      text-align: center;
+      color: #555;
+      font-size: 0.95rem;
+      margin: auto;
+    }
+
+    .chat-input-row {
+      display: flex;
+      gap: 10px;
+      padding: 16px 20px;
+      background: rgba(0, 0, 0, 0.2);
+      border-top: 1px solid var(--stroke);
+    }
+
+    .btn-icon {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--stroke);
+      color: var(--muted);
+      border-radius: var(--radius-sm);
+      width: 48px;
+      height: 48px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: all 0.2s;
+    }
+
+    .btn-icon:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text);
+    }
+
+    .btn-icon:disabled {
+      opacity: 0.5;
+    }
+
+    #chatInput {
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+    }
 
     #toastContainer {
-      position: fixed; right: 24px; bottom: 24px; z-index: 50;
-      display: grid; gap: 12px; width: min(380px, calc(100vw - 48px)); pointer-events: none;
+      position: fixed;
+      left: 24px;
+      bottom: 24px;
+      z-index: 150;
+      display: grid;
+      gap: 12px;
+      width: min(380px, calc(100vw - 48px));
+      pointer-events: none;
+      transition: top 0.4s, bottom 0.4s;
     }
-    .toast {
-      pointer-events: auto; padding: 16px; border-radius: var(--radius-md);
-      background: var(--surface); backdrop-filter: blur(12px);
-      border: 1px solid var(--stroke); box-shadow: 0 16px 32px rgba(0,0,0,0.5);
-      animation: popIn 0.3s cubic-bezier(0.25, 1, 0.5, 1); display: flex; align-items: center; gap: 12px;
-    }
-    .toast.success { border-left: 4px solid var(--success); }
-    .toast.error { border-left: 4px solid var(--danger); }
-    .toast.warning, .toast.info { border-left: 4px solid var(--accent); }
-    
-    @keyframes popIn {
-      from { transform: translateX(20px) scale(0.95); opacity: 0; }
-      to { transform: translateX(0) scale(1); opacity: 1; }
-    }
-    
-    .video-mute-icon {
-      position: absolute; top: 12px; right: 12px; background: rgba(225, 29, 72, 0.9);
-      color: white; width: 32px; height: 32px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center; z-index: 20;
-    }
-    
-    .video-nametag {
-      position: absolute; bottom: 16px; left: 16px; background: rgba(0,0,0,0.7);
-      backdrop-filter: blur(8px); color: white; padding: 6px 12px; border-radius: 8px;
-      font-size: 0.85rem; font-weight: 600; z-index: 10; pointer-events: none; border: 1px solid var(--stroke);
-    }
-    
-    .typing-indicator { font-size: 0.85rem; color: var(--accent); margin-top: -4px; margin-bottom: 8px; display: none; }
-    
-    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
-    .hidden { display: none !important; }
 
-    .progress-bar-fill { width: 0%; height: 100%; background-color: var(--accent); transition: width 0.1s linear; }
+    .toast {
+      pointer-events: auto;
+      padding: 16px;
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--stroke);
+      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
+      animation: popIn 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .toast.success {
+      border-left: 4px solid var(--success);
+    }
+
+    .toast.error {
+      border-left: 4px solid var(--danger);
+    }
+
+    .toast.warning,
+    .toast.info {
+      border-left: 4px solid var(--accent);
+    }
+
+    @keyframes popIn {
+      from {
+        transform: translateX(-20px) scale(0.95);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateX(0) scale(1);
+        opacity: 1;
+      }
+    }
+
+    .video-mute-icon {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(225, 29, 72, 0.9);
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+
+    .video-nametag {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      color: white;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      z-index: 10;
+      pointer-events: none;
+      border: 1px solid var(--stroke);
+    }
+
+    .typing-indicator {
+      font-size: 0.85rem;
+      color: var(--accent);
+      margin-top: -4px;
+      margin-bottom: 8px;
+      display: none;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .progress-bar-fill {
+      width: 0%;
+      height: 100%;
+      background-color: var(--accent);
+      transition: width 0.1s linear;
+    }
 
     @media (max-width: 768px) {
-      .join-card { padding: 32px 24px; width: 100%; border-radius: 0; border: none; min-height: 100vh; justify-content: center; background: var(--bg-0); }
-      .app-footer { position: relative; margin-top: auto; padding-bottom: 24px; }
-      
-      .header-bar { flex-wrap: wrap; padding: 12px; gap: 10px; margin: 8px; border-radius: var(--radius-md); }
-      #copyLinkBtn { padding: 8px 12px; font-size: 0.85rem; }
-      
-      .sidebar { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; max-width: 100%; box-shadow: -10px 0 40px rgba(0,0,0,0.8); }
-      .sidebar-tabs, .sidebar-content { width: 100vw; }
-      .close-sidebar-btn { display: flex; align-items: center; justify-content: center; }
-      
-      .main-stage { padding: 0; gap: 0; }
-      .floating-controls {
-        position: fixed; bottom: 0; left: 0; right: 0; transform: none; width: 100%;
-        padding: 16px; gap: 8px; flex-wrap: wrap; justify-content: center;
-        border-radius: 0; border: none; border-top: 1px solid var(--stroke);
-        background: rgba(10, 10, 10, 0.9); box-shadow: 0 -8px 30px rgba(0,0,0,0.6); z-index: 90;
+      #toastContainer {
+        bottom: 90px; /* Clear mobile controls */
       }
-      .control-btn { width: 44px; height: 44px; }
-      
-      #video-grid { padding: 12px; padding-bottom: 100px; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-      .video-wrapper.focused { bottom: 0; height: 100%; border-radius: 0; }
+      .join-card {
+        padding: 32px 24px;
+        width: 100%;
+        border-radius: 0;
+        border: none;
+        min-height: 100vh;
+        justify-content: center;
+        background: var(--bg-0);
+      }
+
+      .app-footer {
+        position: relative;
+        margin-top: auto;
+        padding-bottom: 24px;
+      }
+
+      .header-bar {
+        flex-wrap: wrap;
+        padding: 12px;
+        gap: 10px;
+        margin: 8px;
+        border-radius: var(--radius-md);
+      }
+
+      #copyLinkBtn {
+        padding: 8px 12px;
+        font-size: 0.85rem;
+      }
+
+      .sidebar {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: -10px 0 40px rgba(0, 0, 0, 0.8);
+      }
+
+      .sidebar-tabs,
+      .sidebar-content {
+        width: 100vw;
+      }
+
+      .close-sidebar-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .main-stage {
+        padding: 0;
+        gap: 0;
+      }
+
+      .floating-controls {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        transform: none;
+        width: 100%;
+        padding: 16px;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+        border-radius: 0;
+        border: none;
+        border-top: 1px solid var(--stroke);
+        background: rgba(10, 10, 10, 0.9);
+        box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.6);
+        z-index: 90;
+      }
+
+      .control-btn {
+        width: 44px;
+        height: 44px;
+      }
+
+      #video-grid {
+        padding: 12px;
+        padding-bottom: 100px;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      }
+
+      .video-wrapper.focused {
+        bottom: 0;
+        height: 100%;
+        border-radius: 0;
+      }
     }
   </style>
 </head>
+
 <body>
   <main class="app-shell">
     <section id="roomView">
       <div class="join-card">
         <h1>CallMee</h1>
         <p>Professional low-latency video meetings.</p>
-        
+
         <div class="input-group">
           <input type="text" id="usernameInput" placeholder="Display Name" maxlength="32" />
           <input type="text" id="roomInput" placeholder="Room ID" maxlength="64" />
           <input type="password" id="passwordInput" placeholder="Room Password (optional)" maxlength="128" />
           <label class="sr-only" for="deviceSelect">Microphone device</label>
-          <select id="deviceSelect"><option value="">Detecting hardware...</option></select>
+          <select id="deviceSelect">
+            <option value="">Detecting hardware...</option>
+          </select>
           <button id="joinBtn" class="btn-primary">Join Room</button>
-          <button id="instructionsBtn" class="btn-secondary">How to Use</button>
+          <button id="generateLinkBtn" class="btn-secondary" style="margin-top: 0.5rem;">Create Secure Room</button>
+          <button id="instructionsBtn" class="btn-secondary" style="margin-top: 0.5rem;">How to Use</button>
         </div>
       </div>
       <footer class="app-footer">
@@ -535,30 +927,71 @@
             <span id="peerCount" style="color:var(--muted); margin-left: 10px;">Peers: 0</span>
           </div>
           <div style="display:flex; gap:10px;">
-            <button id="copyLinkBtn" class="btn-primary" style="padding: 8px 16px; font-size: 0.9rem;"><i class="fa-solid fa-link"></i> Invite</button>
+            <button id="copyLinkBtn" class="btn-primary" style="padding: 8px 16px; font-size: 0.9rem;"><i
+                class="fa-solid fa-link"></i> Invite</button>
           </div>
         </div>
 
         <div id="video-grid"></div>
 
         <div class="floating-controls">
-          <button id="muteBtn" class="control-btn" title="Toggle Microphone" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></button>
-          <button id="videoBtn" class="control-btn" title="Toggle Camera" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg></button>
-          <button id="screenShareBtn" class="control-btn" title="Share Screen" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></button>
-          <button id="recordBtn" class="control-btn" title="Record Audio" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg></button>
-          <button id="retryMicBtn" class="control-btn" title="Refresh Audio Device"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg></button>
-          <button id="toggleSidebarBtn" class="control-btn" title="Toggle Sidebar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button>
-          <button id="hangupBtn" class="control-btn danger" title="Leave Call"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path><line x1="23" y1="1" x2="1" y2="23"></line></svg></button>
+          <button id="muteBtn" class="control-btn" title="Toggle Microphone" disabled><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg></button>
+          <button id="videoBtn" class="control-btn" title="Toggle Camera" disabled><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg></button>
+          <button id="screenShareBtn" class="control-btn" title="Share Screen" disabled><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg></button>
+          <button id="recordBtn" class="control-btn" title="Record Audio" disabled><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg></button>
+          <button id="retryMicBtn" class="control-btn" title="Refresh Audio Device"><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg></button>
+          <button id="toggleSidebarBtn" class="control-btn" title="Toggle Sidebar"><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg></button>
+          <button id="hangupBtn" class="control-btn danger" title="Leave Call"><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path
+                d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91">
+              </path>
+              <line x1="23" y1="1" x2="1" y2="23"></line>
+            </svg></button>
         </div>
       </div>
-      
+
       <aside class="sidebar collapsed" id="sidePanel">
         <div class="sidebar-tabs">
           <button class="tab-btn active" id="tabChat">Chat</button>
           <button class="tab-btn" id="tabParticipants">Participants</button>
-          <button class="tab-btn close-sidebar-btn" id="closeSidebarBtnMobile" title="Close Sidebar"><i class="fa-solid fa-xmark"></i></button>
+          <button class="tab-btn close-sidebar-btn" id="closeSidebarBtnMobile" title="Close Sidebar"><i
+              class="fa-solid fa-xmark"></i></button>
         </div>
-        
+
         <div class="sidebar-content" id="chatPanel">
           <div id="chatBox">
             <div class="chat-empty">Send a message to the room.</div>
@@ -571,23 +1004,27 @@
             <button id="sendBtn" class="btn-icon" disabled><i class="fa-solid fa-paper-plane"></i></button>
           </div>
         </div>
-        
+
         <div class="sidebar-content hidden" id="participantsPanel">
-          
-          <div class="sidebar-section" style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 16px;">
-            <label style="font-size: 0.8rem; color: var(--muted); margin-bottom: 8px; display: block;">Select Microphone</label>
-            <select id="midCallDeviceSelect" class="form-input" style="width: 100%; padding: 8px; font-size: 0.9rem; margin-bottom: 12px;">
+
+          <div class="sidebar-section"
+            style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 16px;">
+            <label style="font-size: 0.8rem; color: var(--muted); margin-bottom: 8px; display: block;">Select
+              Microphone</label>
+            <select id="midCallDeviceSelect" class="form-input"
+              style="width: 100%; padding: 8px; font-size: 0.9rem; margin-bottom: 12px;">
               <option value="">Default Microphone</option>
             </select>
-            
-            <label style="font-size: 0.8rem; color: var(--muted); margin-bottom: 8px; display: block;">Select Camera</label>
+
+            <label style="font-size: 0.8rem; color: var(--muted); margin-bottom: 8px; display: block;">Select
+              Camera</label>
             <select id="midCallCameraSelect" class="form-input" style="width: 100%; padding: 8px; font-size: 0.9rem;">
               <option value="">Default Camera</option>
             </select>
           </div>
 
           <div id="participantList">
-             <div class="chat-empty">No participants yet.</div>
+            <div class="chat-empty">No participants yet.</div>
           </div>
         </div>
       </aside>
@@ -602,19 +1039,24 @@
       </div>
       <div class="modal-body">
         <h3>Getting Started</h3>
-        <p>Welcome to CallMee! To join a meeting, simply enter your Display Name and the Room ID. If the room has a password, enter that as well.</p>
-        
+        <p>Welcome to CallMee! To join a meeting, simply enter your Display Name and the Room ID. If the room has a
+          password, enter that as well.</p>
+
         <h3>During the Call</h3>
         <ul>
           <li><strong>Microphone & Camera:</strong> Use the controls at the bottom to toggle your audio and video.</li>
           <li><strong>Screen Sharing:</strong> Click the monitor icon to share your screen with other participants.</li>
-          <li><strong>Focus View:</strong> Double-click on any participant's video to pin it to the main stage. Double-click again to unpin.</li>
-          <li><strong>Sidebar:</strong> Toggle the sidebar using the panel icon to view the chat and participant list.</li>
-          <li><strong>Device Settings:</strong> You can change your microphone or camera mid-call from the Participants tab in the sidebar.</li>
+          <li><strong>Focus View:</strong> Double-click on any participant's video to pin it to the main stage.
+            Double-click again to unpin.</li>
+          <li><strong>Sidebar:</strong> Toggle the sidebar using the panel icon to view the chat and participant list.
+          </li>
+          <li><strong>Device Settings:</strong> You can change your microphone or camera mid-call from the Participants
+            tab in the sidebar.</li>
         </ul>
-        
+
         <h3>Troubleshooting</h3>
-        <p>If you cannot hear others or they cannot hear you, please verify your browser permissions and ensure the correct hardware device is selected.</p>
+        <p>If you cannot hear others or they cannot hear you, please verify your browser permissions and ensure the
+          correct hardware device is selected.</p>
       </div>
     </div>
   </div>
@@ -625,18 +1067,85 @@
         <h2>Privacy Policy</h2>
         <button class="modal-close" id="closePrivacyBtn"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <div class="modal-body">
-        <h3>Information We Collect</h3>
-        <p>We collect minimal data necessary for the operation of the WebRTC video service. We do not store any video, audio, or chat data permanently.</p>
-        
-        <h3>How We Use Your Information</h3>
-        <p>Your display name and temporary connection information are used solely to facilitate the active call session.</p>
+      <div class="modal-body" style="text-align: left;">
+        <p><strong>Effective Date:</strong> July 9, 2026<br>
+          <strong>Last Updated:</strong> July 9, 2026
+        </p>
 
-        <h3>Data Security</h3>
-        <p>All video and audio traffic is encrypted peer-to-peer using WebRTC security standards. Signaling traffic is secured via WSS/HTTPS.</p>
+        <h3>1. Introduction</h3>
+        <p>Welcome to CallMee ("we," "our," or "us"). We value your privacy and are committed to protecting your
+          personal information. This Privacy Policy explains how we collect, use, disclose, and safeguard your
+          information when you use our video calling platform.</p>
+        <p>By using our services, you agree to the practices described in this Privacy Policy.</p>
 
-        <h3>Changes to this Policy</h3>
-        <p>We reserve the right to update this policy at any time. Continued use of the application indicates acceptance of these terms.</p>
+        <h3>2. Information We Collect</h3>
+        <p>We may collect the following categories of information:</p>
+        <ul>
+          <li><strong>Account & Room Information:</strong> Display Name, Room ID, and Room Password (if applicable). We
+            do not require permanent user accounts.</li>
+          <li><strong>Device Information:</strong> IP address, device type, operating system, and browser information.
+          </li>
+          <li><strong>Communication Data:</strong> Chat messages and file attachments shared during active meetings.
+            This data is ephemeral and not permanently stored on our servers.</li>
+          <li><strong>Audio and Video Data:</strong> We transmit audio and video only to provide the video calling
+            service. We do not permanently store your audio or video content.</li>
+        </ul>
+        <p>If recording is enabled, recordings are processed and stored locally on the user's device. We do not have
+          access to these recordings.</p>
+
+        <h3>3. How We Use Your Information</h3>
+        <p>We use your information to:</p>
+        <ul>
+          <li>Provide video conferencing, chat, and file-sharing services</li>
+          <li>Authenticate users into secure rooms</li>
+          <li>Troubleshoot technical issues and improve service quality</li>
+        </ul>
+
+        <h3>4. Meeting Security</h3>
+        <p>We use industry-standard security measures, including:</p>
+        <ul>
+          <li>Encryption of data in transit (WebRTC DTLS/SRTP for media, TLS/WSS for signaling)</li>
+          <li>Password-protected meetings</li>
+          <li>Peer-to-peer media transmission where possible</li>
+        </ul>
+
+        <h3>5. Cookies and Similar Technologies</h3>
+        <p>We may use local storage to remember your preferences, such as selected camera or microphone devices, to
+          enhance your user experience. You can control this through your browser settings.</p>
+
+        <h3>6. Information Sharing</h3>
+        <p>We do not sell your personal information. We may share information with law enforcement or regulators only
+          when legally required to do so.</p>
+
+        <h3>7. Data Retention</h3>
+        <p>We retain information only as long as necessary to provide the services. Connection data, chat messages, and
+          files are temporary and discarded when the meeting ends.</p>
+
+        <h3>8. Your Rights</h3>
+        <p>Depending on your location, you may have the right to access, restrict, or object to the processing of your
+          personal information. Since we do not store persistent user accounts, data is automatically deleted
+          post-session.</p>
+
+        <h3>9. Children's Privacy</h3>
+        <p>Our services are not intended for children under the age required by applicable law without parental consent.
+          We do not knowingly collect personal information from children.</p>
+
+        <h3>10. Data Security</h3>
+        <p>We implement appropriate technical measures to protect your data. While we strive to protect your
+          information, no method of transmission over the internet is completely secure.</p>
+
+        <h3>11. Third-Party Services</h3>
+        <p>Our platform may utilize third-party STUN/TURN servers to facilitate peer-to-peer network connections. These
+          services handle IP routing but do not have access to decrypted media.</p>
+
+        <h3>12. Changes to This Privacy Policy</h3>
+        <p>We may update this Privacy Policy from time to time. Continued use of our services after changes become
+          effective constitutes acceptance of the updated Privacy Policy.</p>
+
+        <h3>13. Contact Us</h3>
+        <p>If you have any questions about this Privacy Policy or our privacy practices, please contact us at
+          <strong>support@callmee.duckdns.org</strong>.
+        </p>
       </div>
     </div>
   </div>
@@ -692,4 +1201,5 @@
     }
   </script>
 </body>
+
 </html>
