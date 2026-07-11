@@ -115,6 +115,7 @@ async function decryptMessage(key, encryptedBase64, ivBase64) {
 }
 // ------------------------------------------------
 
+const typingUsers = new Set();
 const state = {
   e2eeKey: null,
   roomId: '',
@@ -185,6 +186,7 @@ async function startRecording() {
         video: { displaySurface: "browser" },
         audio: true,
         surfaceSwitching: "include",
+        selfBrowserSurface: "exclude",
         preferCurrentTab: false
       });
 
@@ -537,11 +539,10 @@ function buildParticipantItem(nameText, statusText, badgeLabel, badgeClass, peer
   if (isMuted) micEl.classList.add('muted');
   micEl.id = `participant-mic-${peerId}`;
 
-  if (isMuted) {
-    micEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-  } else {
-    micEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-  }
+  micEl.innerHTML = `
+    <svg class="mic-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+    <svg class="mic-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+  `;
 
   item.appendChild(micEl);
   item.appendChild(badgeEl);
@@ -644,7 +645,9 @@ function setupAudioAnalyser(stream, id) {
     source.connect(analyser);
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    state.audioAnalysers.set(id, { analyser, source, dataArray });
+    const participantEl = document.getElementById(`participant-${id}`);
+    const videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
+    state.audioAnalysers.set(id, { analyser, source, dataArray, participantEl, videoWrapperEl });
 
     if (!speakerPollId) {
       pollActiveSpeakers();
@@ -667,24 +670,24 @@ function pollActiveSpeakers(timestamp) {
   if (timestamp - lastPollTime < 100) return;
   lastPollTime = timestamp;
 
-  state.audioAnalysers.forEach(({ analyser, dataArray }, id) => {
+  state.audioAnalysers.forEach((analyserData, id) => {
+    const { analyser, dataArray } = analyserData;
     analyser.getByteFrequencyData(dataArray);
     let sum = 0;
     for (let i = 0; i < dataArray.length; i++) {
       sum += dataArray[i];
     }
-    const average = sum / dataArray.length;
+    const isSpeaking = (sum / dataArray.length) > 15;
 
-    const el = document.getElementById(`participant-${id}`);
-    const wrapper = document.getElementById(`video-wrapper-${id}`);
-
-    if (average > 15) {
-      if (el) el.classList.add('active-speaker');
-      if (wrapper) wrapper.classList.add('active-speaker');
-    } else {
-      if (el) el.classList.remove('active-speaker');
-      if (wrapper) wrapper.classList.remove('active-speaker');
+    if (!analyserData.participantEl || !analyserData.participantEl.isConnected) {
+      analyserData.participantEl = document.getElementById(`participant-${id}`);
     }
+    if (!analyserData.videoWrapperEl || !analyserData.videoWrapperEl.isConnected) {
+      analyserData.videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
+    }
+
+    if (analyserData.participantEl) analyserData.participantEl.classList.toggle('active-speaker', isSpeaking);
+    if (analyserData.videoWrapperEl) analyserData.videoWrapperEl.classList.toggle('active-speaker', isSpeaking);
   });
 }
 
@@ -727,7 +730,10 @@ function unfocusVideo() {
 }
 
 function focusVideo(peerId) {
-  if (state.focusedPeerId === peerId) return;
+  if (state.focusedPeerId === peerId) {
+    unfocusVideo();
+    return;
+  }
   unfocusVideo();
   const wrapper = document.getElementById(`video-wrapper-${peerId}`);
   if (wrapper) {
@@ -759,7 +765,8 @@ function updateLocalVideoPreview() {
 
     const avatar = document.createElement('div');
     avatar.className = 'avatar-placeholder';
-    avatar.textContent = state.username || 'You';
+    const nameStr = state.username || 'You';
+    avatar.textContent = nameStr.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     avatar.style.position = 'absolute';
     avatar.style.color = 'white';
     avatar.style.fontSize = '2rem';
@@ -776,6 +783,32 @@ function updateLocalVideoPreview() {
       unfocusVideo();
     });
 
+    // Create the Fullscreen Button
+    const fsBtn = document.createElement('div');
+    fsBtn.className = 'fullscreen-btn';
+    fsBtn.title = 'Fullscreen';
+    fsBtn.innerHTML = `
+      <svg class="fs-expand" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+      <svg class="fs-compress" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>
+    `;
+    fsBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Stops the click from also triggering "Focus Mode"
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (wrapper.requestFullscreen) {
+          wrapper.requestFullscreen().catch(err => console.warn('Fullscreen denied:', err));
+        } else if (localVideoEl && localVideoEl.webkitEnterFullscreen) {
+          localVideoEl.webkitEnterFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      }
+    });
+
+    // MODE 2 Trigger: Clicking the card itself
     wrapper.addEventListener('click', () => {
       focusVideo('local');
     });
@@ -785,6 +818,7 @@ function updateLocalVideoPreview() {
     wrapper.appendChild(avatar);
     wrapper.appendChild(nametag);
     wrapper.appendChild(unpinBtn);
+    wrapper.appendChild(fsBtn);
     ui.videoContainer.appendChild(wrapper);
   }
 
@@ -1026,6 +1060,7 @@ function attachDataChannel(peerId, channel) {
     
     for (const [fileId, fileState] of state.incomingFiles.entries()) {
       if (fileState.peerId === peerId) {
+        fileState.chunks = []; // Clear buffers for GC
         removeFileProgress(fileId);
         state.incomingFiles.delete(fileId);
       }
@@ -1121,7 +1156,7 @@ function ensurePeerVideoWrapper(peerId, username = 'Peer') {
 
     const avatar = document.createElement('div');
     avatar.className = 'avatar-placeholder';
-    avatar.textContent = username;
+    avatar.textContent = username.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     avatar.style.position = 'absolute';
     avatar.style.color = 'white';
     avatar.style.fontSize = '2rem';
@@ -1149,6 +1184,33 @@ function ensurePeerVideoWrapper(peerId, username = 'Peer') {
       unfocusVideo();
     });
 
+    // Create the Fullscreen Button
+    const fsBtn = document.createElement('div');
+    fsBtn.className = 'fullscreen-btn';
+    fsBtn.title = 'Fullscreen';
+    fsBtn.innerHTML = `
+      <svg class="fs-expand" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+      <svg class="fs-compress" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>
+    `;
+    fsBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Stops the click from also triggering "Focus Mode"
+      const videoEl = document.getElementById(`video-${peerId}`);
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (wrapper.requestFullscreen) {
+          wrapper.requestFullscreen().catch(err => console.warn('Fullscreen denied:', err));
+        } else if (videoEl && videoEl.webkitEnterFullscreen) {
+          videoEl.webkitEnterFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      }
+    });
+
+    // MODE 2 Trigger: Clicking the card itself
     wrapper.addEventListener('click', () => {
       focusVideo(peerId);
     });
@@ -1157,6 +1219,7 @@ function ensurePeerVideoWrapper(peerId, username = 'Peer') {
     wrapper.appendChild(muteIcon);
     wrapper.appendChild(nametag);
     wrapper.appendChild(unpinBtn);
+    wrapper.appendChild(fsBtn);
     ui.videoContainer.appendChild(wrapper);
   }
 }
@@ -1223,6 +1286,7 @@ function ensurePeer(peerId, providedUsername = null) {
         videoEl.id = `video-${peerId}`;
         videoEl.autoplay = true;
         videoEl.playsInline = true;
+        videoEl.muted = true;
         videoEl.style.transition = 'opacity 0.2s ease';
         wrapper.appendChild(videoEl);
         const avatar = wrapper.querySelector('.avatar-placeholder');
@@ -1393,6 +1457,34 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
   if (!peer) return;
 
   state.peers.delete(peerId);
+
+  if (peer.typingTimeout) {
+    clearTimeout(peer.typingTimeout);
+    const userName = peer.username || 'Someone';
+    if (typeof typingUsers !== 'undefined' && typingUsers.has(userName)) {
+      typingUsers.delete(userName);
+      const typingIndicator = document.getElementById('typingIndicator');
+      if (typingIndicator) {
+        if (typingUsers.size === 0) {
+          typingIndicator.style.display = 'none';
+        } else if (typingUsers.size === 1) {
+          typingIndicator.textContent = `${Array.from(typingUsers)[0]} is typing...`;
+        } else if (typingUsers.size === 2) {
+          typingIndicator.textContent = `${Array.from(typingUsers).join(' and ')} are typing...`;
+        } else {
+          typingIndicator.textContent = 'Multiple people are typing...';
+        }
+      }
+    }
+  }
+
+  for (const [fileId, fileState] of state.incomingFiles.entries()) {
+    if (fileState.peerId === peerId) {
+      fileState.chunks = []; // Clear buffers for GC
+      removeFileProgress(fileId);
+      state.incomingFiles.delete(fileId);
+    }
+  }
 
   if (peer.dataChannel && peer.dataChannel.readyState !== 'closed') {
     try {
@@ -2108,6 +2200,7 @@ async function toggleScreenShare() {
         },
         audio: true,
         surfaceSwitching: "include",
+        selfBrowserSurface: "exclude",
         preferCurrentTab: false
       });
       state.screenSharing = true;
@@ -2223,7 +2316,6 @@ async function retryMicAccess() {
   if (!state.roomId) return;
 
   ui.retryMicBtn.disabled = true;
-  ui.retryMicBtn.textContent = 'Requesting...';
 
   try {
     await acquireLocalMedia(ui.deviceSelect.value, {
@@ -2322,6 +2414,11 @@ socket.on('connect_error', (error) => {
 socket.on('peer-joined', ({ peerId, username }) => {
   if (!peerId || peerId === socket.id || !state.roomId) return;
   ensurePeer(peerId, username);
+
+  if (currentTrack()) {
+    socket.emit('media-state-change', { type: 'audio', enabled: currentTrack().enabled });
+  }
+  socket.emit('media-state-change', { type: 'video', enabled: state.videoEnabled || state.screenSharing });
 });
 
 socket.on('peer-disconnected', ({ peerId }) => {
@@ -2394,10 +2491,8 @@ function handleMediaStateChange(data) {
     if (participantMic) {
       if (data.enabled) {
         participantMic.classList.remove('muted');
-        participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
       } else {
         participantMic.classList.add('muted');
-        participantMic.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
       }
     }
   } else if (data.type === 'video') {
@@ -2426,11 +2521,30 @@ socket.on('typing', (data) => {
 
   const typingIndicator = document.getElementById('typingIndicator');
   if (typingIndicator) {
-    typingIndicator.textContent = `${data.username || peer.username || 'Someone'} is typing...`;
+    const userName = data.username || peer.username || 'Someone';
+    typingUsers.add(userName);
+    
+    if (typingUsers.size === 1) {
+      typingIndicator.textContent = `${Array.from(typingUsers)[0]} is typing...`;
+    } else if (typingUsers.size === 2) {
+      typingIndicator.textContent = `${Array.from(typingUsers).join(' and ')} are typing...`;
+    } else {
+      typingIndicator.textContent = 'Multiple people are typing...';
+    }
+    
     typingIndicator.style.display = 'block';
     clearTimeout(peer.typingTimeout);
     peer.typingTimeout = setTimeout(() => {
-      typingIndicator.style.display = 'none';
+      typingUsers.delete(userName);
+      if (typingUsers.size === 0) {
+        typingIndicator.style.display = 'none';
+      } else if (typingUsers.size === 1) {
+        typingIndicator.textContent = `${Array.from(typingUsers)[0]} is typing...`;
+      } else if (typingUsers.size === 2) {
+        typingIndicator.textContent = `${Array.from(typingUsers).join(' and ')} are typing...`;
+      } else {
+        typingIndicator.textContent = 'Multiple people are typing...';
+      }
     }, 3000);
   }
 });
@@ -2728,5 +2842,60 @@ if (closeSidebarBtnMobile) {
   closeSidebarBtnMobile.addEventListener('click', () => {
     document.getElementById('sidePanel').classList.add('collapsed');
     document.body.classList.remove('sidebar-open');
+  });
+}
+
+document.addEventListener('fullscreenchange', () => {
+  const isFs = !!document.fullscreenElement;
+  document.querySelectorAll('.fullscreen-btn').forEach(btn => {
+    btn.classList.toggle('is-fullscreen', isFs);
+  });
+});
+
+document.addEventListener('webkitfullscreenchange', () => {
+  const isFs = !!document.webkitFullscreenElement;
+  document.querySelectorAll('.fullscreen-btn').forEach(btn => {
+    btn.classList.toggle('is-fullscreen', isFs);
+  });
+});
+
+const instructionsBtn = document.getElementById('instructionsBtn');
+const closeInstructionsBtn = document.getElementById('closeInstructionsBtn');
+const instructionsModal = document.getElementById('instructionsModal');
+
+if (instructionsBtn && closeInstructionsBtn && instructionsModal) {
+  instructionsBtn.addEventListener('click', () => {
+    instructionsModal.classList.add('active');
+  });
+
+  closeInstructionsBtn.addEventListener('click', () => {
+    instructionsModal.classList.remove('active');
+  });
+
+  instructionsModal.addEventListener('click', (e) => {
+    if (e.target === instructionsModal) {
+      instructionsModal.classList.remove('active');
+    }
+  });
+}
+
+const privacyPolicyBtn = document.getElementById('privacyPolicyBtn');
+const closePrivacyBtn = document.getElementById('closePrivacyBtn');
+const privacyPolicyModal = document.getElementById('privacyPolicyModal');
+
+if (privacyPolicyBtn && closePrivacyBtn && privacyPolicyModal) {
+  privacyPolicyBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    privacyPolicyModal.classList.add('active');
+  });
+
+  closePrivacyBtn.addEventListener('click', () => {
+    privacyPolicyModal.classList.remove('active');
+  });
+
+  privacyPolicyModal.addEventListener('click', (e) => {
+    if (e.target === privacyPolicyModal) {
+      privacyPolicyModal.classList.remove('active');
+    }
   });
 }
