@@ -333,6 +333,8 @@ const ui = {
   roomChipValue: document.getElementById('roomChipValue'),
   peerCount: document.getElementById('peerCount'),
   socketState: document.getElementById('socketState'),
+  midCallDeviceSelect: document.getElementById('midCallDeviceSelect'),
+  midCallCameraSelect: document.getElementById('midCallCameraSelect'),
 };
 
 function supportsRequiredApis() {
@@ -902,11 +904,61 @@ function pruneOldChatMessages() {
   }
 }
 
+function playMessageSound() {
+  try {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return;
+    
+    if (!state.audioContext) {
+      state.audioContext = new AudioContextCtor();
+    }
+    
+    const ctx = state.audioContext;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(1200, ctx.currentTime); 
+    
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch (e) {
+    console.warn('Could not play message sound:', e);
+  }
+}
+
 function appendMessage(text, isSelf, senderName = '') {
   const placeholder = ui.chatBox.querySelector('.chat-empty');
   if (placeholder) placeholder.remove();
 
   pruneOldChatMessages();
+  
+  if (!isSelf) {
+    playMessageSound();
+    
+    // --- Floating Notification Logic ---
+    const sidePanel = document.getElementById('sidePanel');
+    const chatPanel = document.getElementById('chatPanel');
+    const isChatVisible = sidePanel && !sidePanel.classList.contains('collapsed') && chatPanel && !chatPanel.classList.contains('hidden');
+
+    if (!isChatVisible) {
+      const shortMsg = text.length > 30 ? text.substring(0, 30) + '...' : text;
+      showToast(`New message from ${senderName || 'Someone'}: "${shortMsg}"`, 'info');
+      const badge = document.getElementById('chatUnreadBadge');
+      if (badge) badge.classList.remove('hidden');
+    }
+  }
 
   const el = document.createElement('div');
   el.className = `chat-msg${isSelf ? ' self' : ''}`;
@@ -921,7 +973,25 @@ function appendMessage(text, isSelf, senderName = '') {
   }
 
   const textEl = document.createElement('div');
-  textEl.textContent = text;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  
+  parts.forEach(part => {
+    if (part.match(urlRegex)) {
+      const a = document.createElement('a');
+      a.href = part;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = part;
+      a.style.color = isSelf ? 'white' : 'var(--accent)';
+      a.style.textDecoration = 'underline';
+      a.style.wordBreak = 'break-all';
+      textEl.appendChild(a);
+    } else if (part) {
+      textEl.appendChild(document.createTextNode(part));
+    }
+  });
+
   el.appendChild(textEl);
 
   ui.chatBox.appendChild(el);
@@ -1488,6 +1558,10 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
 
   if (peer.dataChannel && peer.dataChannel.readyState !== 'closed') {
     try {
+      peer.dataChannel.onmessage = null;
+      peer.dataChannel.onopen = null;
+      peer.dataChannel.onclose = null;
+      peer.dataChannel.onerror = null;
       peer.dataChannel.close();
     } catch (_error) { }
   }
@@ -1500,6 +1574,8 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
       peer.pc.ontrack = null;
       peer.pc.ondatachannel = null;
       peer.pc.onconnectionstatechange = null;
+      peer.pc.oniceconnectionstatechange = null;
+      peer.pc.onsignalingstatechange = null;
       peer.pc.onnegotiationneeded = null;
       peer.pc.close();
     } catch (_error) { }
@@ -1722,28 +1798,26 @@ async function populateDevices(selectedDeviceId = state.selectedDeviceId) {
       const keepValue = ui.deviceSelect.querySelector(`option[value="${selectedDeviceId}"]`) ? selectedDeviceId : '';
       ui.deviceSelect.value = keepValue;
 
-      const midCallDeviceSelect = document.getElementById('midCallDeviceSelect');
-      if (midCallDeviceSelect) {
-        midCallDeviceSelect.innerHTML = ui.deviceSelect.innerHTML;
-        midCallDeviceSelect.value = keepValue;
+      if (ui.midCallDeviceSelect) {
+        ui.midCallDeviceSelect.innerHTML = ui.deviceSelect.innerHTML;
+        ui.midCallDeviceSelect.value = keepValue;
       }
     }
 
-    const midCallCameraSelect = document.getElementById('midCallCameraSelect');
-    if (midCallCameraSelect) {
-      midCallCameraSelect.innerHTML = '';
+    if (ui.midCallCameraSelect) {
+      ui.midCallCameraSelect.innerHTML = '';
       const defCamOpt = document.createElement('option');
       defCamOpt.value = '';
       defCamOpt.textContent = 'Default Camera';
-      midCallCameraSelect.appendChild(defCamOpt);
+      ui.midCallCameraSelect.appendChild(defCamOpt);
 
       videoDevices.forEach(device => {
         const opt = document.createElement('option');
         opt.value = device.deviceId;
-        opt.textContent = device.label || `Camera ${midCallCameraSelect.options.length}`;
-        midCallCameraSelect.appendChild(opt);
+        opt.textContent = device.label || `Camera ${ui.midCallCameraSelect.options.length}`;
+        ui.midCallCameraSelect.appendChild(opt);
       });
-      if (state.selectedCameraId) midCallCameraSelect.value = state.selectedCameraId;
+      if (state.selectedCameraId) ui.midCallCameraSelect.value = state.selectedCameraId;
     }
   } catch (error) {
     console.warn('Failed to enumerate devices:', error);
@@ -1754,7 +1828,14 @@ async function joinRoom() {
   if (state.joining) return;
 
   const roomId = normalizeRoomName(ui.roomInput.value);
-  const username = ui.usernameInput.value.trim() || 'Anonymous';
+  let username = ui.usernameInput.value.trim();
+  
+  if (!username || username.toLowerCase() === 'anonymous') {
+    const randomTag = Math.floor(1000 + Math.random() * 9000);
+    username = `Anonymous#${randomTag}`;
+    ui.usernameInput.value = username; // Sync the generated tag back to the UI
+  }
+  
   let password = ui.passwordInput.value || '';
 
   if (!password) {
@@ -2071,6 +2152,21 @@ function appendFileMessage(name, url, size, isSelf, senderName = '') {
   if (placeholder) placeholder.remove();
 
   pruneOldChatMessages();
+  
+  if (!isSelf) {
+    playMessageSound();
+    
+    // --- Floating Notification Logic ---
+    const sidePanel = document.getElementById('sidePanel');
+    const chatPanel = document.getElementById('chatPanel');
+    const isChatVisible = sidePanel && !sidePanel.classList.contains('collapsed') && chatPanel && !chatPanel.classList.contains('hidden');
+
+    if (!isChatVisible) {
+      showToast(`File received from ${senderName || 'Someone'}: ${name}`, 'success');
+      const badge = document.getElementById('chatUnreadBadge');
+      if (badge) badge.classList.remove('hidden');
+    }
+  }
 
   const el = document.createElement('div');
   el.className = `chat-msg${isSelf ? ' self' : ''}`;
@@ -2096,9 +2192,6 @@ function appendFileMessage(name, url, size, isSelf, senderName = '') {
   ui.chatBox.appendChild(el);
   ui.chatBox.scrollTop = ui.chatBox.scrollHeight;
 }
-
-// Utility function to natively mirror a video track removed for efficiency
-// CSS transform: scaleX(-1) is now used instead.
 
 let isTogglingVideo = false;
 
@@ -2411,8 +2504,15 @@ socket.on('connect_error', (error) => {
   setStatus('Socket connection error', 'danger');
 });
 
-socket.on('peer-joined', ({ peerId, username }) => {
+socket.on('peer-joined', async ({ peerId, username }) => {
   if (!peerId || peerId === socket.id || !state.roomId) return;
+  
+  if (state.peers.has(peerId)) {
+    cleanupPeer(peerId, 'peer reconnected');
+    // Yield execution control to let the browser clear the old hardware pipeline
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  
   ensurePeer(peerId, username);
 
   if (currentTrack()) {
@@ -2694,19 +2794,17 @@ ui.chatInput.addEventListener('input', () => {
     typingTimer = null;
   }, 2000);
 });
-const midCallDeviceSelect = document.getElementById('midCallDeviceSelect');
-if (midCallDeviceSelect) {
-  midCallDeviceSelect.addEventListener('change', () => {
-    ui.deviceSelect.value = midCallDeviceSelect.value;
+if (ui.midCallDeviceSelect) {
+  ui.midCallDeviceSelect.addEventListener('change', () => {
+    ui.deviceSelect.value = ui.midCallDeviceSelect.value;
     ui.deviceSelect.dispatchEvent(new Event('change'));
   });
 }
 
-const midCallCameraSelect = document.getElementById('midCallCameraSelect');
-if (midCallCameraSelect) {
-  midCallCameraSelect.addEventListener('change', async () => {
+if (ui.midCallCameraSelect) {
+  ui.midCallCameraSelect.addEventListener('change', async () => {
     if (isAcquiringMedia) return;
-    state.selectedCameraId = midCallCameraSelect.value;
+    state.selectedCameraId = ui.midCallCameraSelect.value;
     if (state.videoEnabled) {
       isAcquiringMedia = true;
       try {
@@ -2815,14 +2913,17 @@ setStatus(
 );
 
 document.getElementById('tabChat').addEventListener('click', (e) => {
-  e.target.classList.add('active');
+  e.currentTarget.classList.add('active');
   document.getElementById('tabParticipants').classList.remove('active');
   document.getElementById('chatPanel').classList.remove('hidden');
   document.getElementById('participantsPanel').classList.add('hidden');
+  
+  const badge = document.getElementById('chatUnreadBadge');
+  if (badge) badge.classList.add('hidden');
 });
 
 document.getElementById('tabParticipants').addEventListener('click', (e) => {
-  e.target.classList.add('active');
+  e.currentTarget.classList.add('active');
   document.getElementById('tabChat').classList.remove('active');
   document.getElementById('participantsPanel').classList.remove('hidden');
   document.getElementById('chatPanel').classList.add('hidden');
@@ -2834,6 +2935,11 @@ if (toggleSidebarBtn) {
     const panel = document.getElementById('sidePanel');
     panel.classList.toggle('collapsed');
     document.body.classList.toggle('sidebar-open', !panel.classList.contains('collapsed'));
+    
+    if (!panel.classList.contains('collapsed') && !document.getElementById('chatPanel').classList.contains('hidden')) {
+      const badge = document.getElementById('chatUnreadBadge');
+      if (badge) badge.classList.add('hidden');
+    }
   });
 }
 

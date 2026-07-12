@@ -906,6 +906,16 @@
       display: none;
     }
 
+    .unread-badge {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background-color: var(--danger);
+      border-radius: 50%;
+      margin-left: 6px;
+      box-shadow: 0 0 6px var(--danger);
+    }
+
     .sr-only {
       position: absolute;
       width: 1px;
@@ -1135,7 +1145,7 @@
 
       <aside class="sidebar collapsed" id="sidePanel">
         <div class="sidebar-tabs">
-          <button class="tab-btn active" id="tabChat">Chat</button>
+          <button class="tab-btn active" id="tabChat">Chat <span class="unread-badge hidden" id="chatUnreadBadge"></span></button>
           <button class="tab-btn" id="tabParticipants">Participants</button>
           <button class="tab-btn close-sidebar-btn" id="closeSidebarBtnMobile" title="Close Sidebar"><i
               class="fa-solid fa-xmark"></i></button>
