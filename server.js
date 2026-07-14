@@ -209,6 +209,8 @@ const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
   message: 'Too many connections',
+  validate: false,
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress,
 });
 
 io.engine.use((req, res, next) => {

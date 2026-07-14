@@ -1,3 +1,8 @@
+import * as filters from './modules/filters.js';
+import * as whiteboard from './modules/whiteboard.js';
+import * as captions from './modules/captions.js';
+import * as stats from './modules/stats.js';
+
 const socket = io();
 
 const ROOM_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -335,6 +340,10 @@ const ui = {
   socketState: document.getElementById('socketState'),
   midCallDeviceSelect: document.getElementById('midCallDeviceSelect'),
   midCallCameraSelect: document.getElementById('midCallCameraSelect'),
+  videoFilterBtn: document.getElementById('videoFilterBtn'),
+  whiteboardBtn: document.getElementById('whiteboardBtn'),
+  ccBtn: document.getElementById('ccBtn'),
+  statsBtn: document.getElementById('statsBtn'),
 };
 
 function supportsRequiredApis() {
@@ -401,6 +410,9 @@ function setCallControlsEnabled(enabled) {
   ui.screenShareBtn.disabled = !enabled;
   ui.recordBtn.disabled = !enabled;
   ui.attachFileBtn.disabled = !enabled || openDataChannelCount() === 0;
+  if (ui.videoFilterBtn) ui.videoFilterBtn.disabled = !enabled;
+  if (ui.whiteboardBtn) ui.whiteboardBtn.disabled = !enabled;
+  if (ui.ccBtn) ui.ccBtn.disabled = !enabled;
 }
 
 function isUsableAudioTrack(track) {
@@ -1116,6 +1128,10 @@ function attachDataChannel(peerId, channel) {
     try {
       channel.send(JSON.stringify({ type: 'audio-state', enabled: isAudioEnabled }));
       channel.send(JSON.stringify({ type: 'video-state', enabled: state.videoEnabled }));
+      const textarea = document.getElementById('wbTextarea');
+      if (textarea && textarea.value.trim()) {
+        channel.send(JSON.stringify({ type: 'wb-text', content: textarea.value }));
+      }
     } catch (e) {
       console.warn('Failed to send initial state:', e);
     }
@@ -1151,6 +1167,21 @@ function attachDataChannel(peerId, channel) {
           handleMediaStateChange({ senderId: peerId, type: 'audio', enabled: msg.enabled });
         } else if (msg.type === 'video-state') {
           handleMediaStateChange({ senderId: peerId, type: 'video', enabled: msg.enabled });
+        } else if (msg.type === 'wb-draw') {
+          whiteboard.handleIncomingDraw(msg);
+        } else if (msg.type === 'wb-clear') {
+          whiteboard.clearCanvas();
+        } else if (msg.type === 'wb-text') {
+          const username = peer.username || 'Peer';
+          whiteboard.handleIncomingText(msg.content, msg.caretIndex, username, peerId);
+        } else if (msg.type === 'wb-cursor') {
+          const username = peer.username || 'Peer';
+          whiteboard.handleIncomingCursor(peerId, msg, username);
+        } else if (msg.type === 'wb-text-cursor') {
+          const username = peer.username || 'Peer';
+          whiteboard.handleIncomingTextCursor(peerId, msg, username);
+        } else if (msg.type === 'caption') {
+          captions.displayCaption(msg.username || 'Peer', msg.text);
         } else if (msg.type === 'file-meta') {
           const fileName = String(msg.name || 'received-file').slice(0, 120);
           const fileSize = Number(msg.size);
@@ -1527,6 +1558,8 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
   if (!peer) return;
 
   state.peers.delete(peerId);
+  stats.cleanupPeerStats(peerId);
+  whiteboard.cleanupPeerCursor(peerId);
 
   if (peer.typingTimeout) {
     clearTimeout(peer.typingTimeout);
@@ -1646,6 +1679,53 @@ function leaveRoom(options = {}) {
 
   if (state.recording) {
     stopRecording();
+  }
+
+  // Reset visual filter
+  try {
+    filters.processTrack(null);
+  } catch (e) {}
+  const filterDropdown = document.getElementById('filterDropdown');
+  if (filterDropdown) {
+    filterDropdown.style.display = 'none';
+    filterDropdown.classList.add('hidden');
+  }
+
+  // Close whiteboard & clear
+  const whiteboardContainer = document.getElementById('whiteboardContainer');
+  if (whiteboardContainer) {
+    whiteboardContainer.style.display = 'none';
+    whiteboardContainer.classList.add('hidden');
+  }
+  if (ui.whiteboardBtn) ui.whiteboardBtn.classList.remove('active');
+  try {
+    whiteboard.clearCanvas();
+  } catch (e) {}
+  const textarea = document.getElementById('wbTextarea');
+  if (textarea) textarea.value = '';
+
+  // Close CC captions
+  const ccOverlay = document.getElementById('ccOverlay');
+  if (ccOverlay) {
+    ccOverlay.style.display = 'none';
+    ccOverlay.classList.add('hidden');
+  }
+  if (ui.ccBtn) {
+    ui.ccBtn.classList.remove('active');
+    ui.ccBtn.style.color = '';
+  }
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    try {
+      if (ui.ccBtn && ui.ccBtn.classList.contains('active')) {
+        ui.ccBtn.click();
+      }
+    } catch (e) {}
+  }
+
+  // Turn off stats if active
+  if (ui.statsBtn && ui.statsBtn.classList.contains('active')) {
+    ui.statsBtn.click();
   }
 
   unfocusVideo();
@@ -2201,6 +2281,9 @@ function turnOffVideo() {
   const previousVideoTrack = currentVideoTrack();
   state.videoEnabled = false;
   rebuildLocalStream(currentTrack(), null);
+  try {
+    filters.processTrack(null);
+  } catch (e) {}
   if (previousVideoTrack) previousVideoTrack.stop();
   updateLocalVideoPreview();
   
@@ -2227,11 +2310,12 @@ async function toggleVideo() {
         audio: false,
         video: getVideoConstraints(),
       });
-      let videoTrack = cameraStream.getVideoTracks()[0] || null;
-      if (!videoTrack || videoTrack.readyState !== 'live') {
+      let rawVideoTrack = cameraStream.getVideoTracks()[0] || null;
+      if (!rawVideoTrack || rawVideoTrack.readyState !== 'live') {
         stopStream(cameraStream);
         throw new Error('No live camera track was returned.');
       }
+      let videoTrack = await filters.processTrack(rawVideoTrack);
 
       const previousVideoTrack = currentVideoTrack();
       state.videoEnabled = true;
@@ -2812,8 +2896,9 @@ if (ui.midCallCameraSelect) {
           audio: false,
           video: getVideoConstraints(),
         });
-        let videoTrack = cameraStream.getVideoTracks()[0] || null;
-        if (videoTrack) {
+        let rawVideoTrack = cameraStream.getVideoTracks()[0] || null;
+        if (rawVideoTrack) {
+          let videoTrack = await filters.processTrack(rawVideoTrack);
           const previousVideoTrack = currentVideoTrack();
           rebuildLocalStream(currentTrack(), videoTrack);
           updateLocalVideoPreview();
@@ -2871,6 +2956,36 @@ if (navigator.mediaDevices?.addEventListener) {
     }
   });
 }
+
+function broadcastDataChannelMessage(payload) {
+  const json = JSON.stringify(payload);
+  state.peers.forEach(peer => {
+    if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
+      try {
+        peer.dataChannel.send(json);
+      } catch (e) {
+        console.warn('Failed to send data channel message:', e);
+      }
+    }
+  });
+}
+
+// Initialize modules
+filters.init((nextTrack) => {
+  rebuildLocalStream(currentTrack(), nextTrack);
+  updateLocalVideoPreview();
+  applyLocalTracksToAllPeers();
+});
+
+whiteboard.init((data) => {
+  broadcastDataChannelMessage(data);
+});
+
+captions.init((data) => {
+  broadcastDataChannelMessage(data);
+}, () => state.username);
+
+stats.init(() => state.peers);
 
 initializeFromQuery();
 setMode('join');
