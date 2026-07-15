@@ -2,44 +2,84 @@ let recognition = null;
 let isActive = false;
 let broadcastCallback = null;
 let getUsernameCallback = null;
+let isMutedCallback = null;
 let fadeTimeout = null;
 let innerFadeTimeout = null;
+let restartAttempts = 0;
+let lastRestartTime = 0;
 
-export function init(broadcastFn, getUsernameFn) {
+const ui = {
+  ccBtn: null,
+  ccOverlay: null,
+  ccSpeaker: null,
+  ccText: null
+};
+
+export function init(broadcastFn, getUsernameFn, isMutedFn) {
   broadcastCallback = broadcastFn;
   getUsernameCallback = getUsernameFn;
+  isMutedCallback = isMutedFn;
   
-  const ccBtn = document.getElementById('ccBtn');
-  if (ccBtn) {
-    ccBtn.addEventListener('click', toggleCaptions);
+  ui.ccBtn = document.getElementById('ccBtn');
+  ui.ccOverlay = document.getElementById('ccOverlay');
+  ui.ccSpeaker = document.getElementById('ccSpeaker');
+  ui.ccText = document.getElementById('ccText');
+  
+  if (ui.ccBtn) {
+    ui.ccBtn.addEventListener('click', toggleCaptions);
   }
 }
 
 export function displayCaption(speaker, text) {
-  const overlay = document.getElementById('ccOverlay');
-  const speakerEl = document.getElementById('ccSpeaker');
-  const textEl = document.getElementById('ccText');
-  
-  if (!overlay || !speakerEl || !textEl) return;
+  if (!ui.ccOverlay || !ui.ccSpeaker || !ui.ccText) return;
   
   clearTimeout(fadeTimeout);
   clearTimeout(innerFadeTimeout);
   
-  speakerEl.textContent = speaker + ':';
-  textEl.textContent = text;
+  ui.ccSpeaker.textContent = speaker + ':';
+  ui.ccText.textContent = text;
   
-  overlay.style.display = 'block';
-  overlay.classList.remove('hidden');
+  ui.ccOverlay.style.display = 'block';
+  ui.ccOverlay.classList.remove('hidden');
   
   fadeTimeout = setTimeout(() => {
-    overlay.classList.add('hidden');
-    // Hide display after animation ends
+    ui.ccOverlay.classList.add('hidden');
     innerFadeTimeout = setTimeout(() => {
-      if (overlay.classList.contains('hidden')) {
-        overlay.style.display = 'none';
+      if (ui.ccOverlay.classList.contains('hidden')) {
+        ui.ccOverlay.style.display = 'none';
       }
     }, 200);
   }, 4000);
+}
+
+export function syncMuteState(isMuted) {
+  if (!isActive) return;
+  
+  if (isMuted) {
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch (e) {
+        console.warn('Failed to stop speech recognition on mute:', e);
+      }
+    }
+  } else {
+    setTimeout(() => {
+      if (isActive && !(isMutedCallback && isMutedCallback())) {
+        try {
+          if (recognition) {
+            recognition.start();
+          } else {
+            startRecognition();
+          }
+        } catch (e) {
+          if (e.name !== 'InvalidStateError') {
+            console.error('Failed to restart speech recognition on unmute:', e);
+          }
+        }
+      }
+    }, 150);
+  }
 }
 
 function startRecognition() {
@@ -56,14 +96,18 @@ function startRecognition() {
   recognition.lang = 'en-US';
   
   recognition.onstart = () => {
-    const ccBtn = document.getElementById('ccBtn');
-    if (ccBtn) {
-      ccBtn.classList.add('active');
-      ccBtn.style.color = 'var(--success)';
+    restartAttempts = 0;
+    if (ui.ccBtn) {
+      ui.ccBtn.classList.add('active');
+      ui.ccBtn.style.color = 'var(--success)';
     }
   };
   
   recognition.onresult = (event) => {
+    if (isMutedCallback && isMutedCallback()) {
+      return;
+    }
+    
     let finalTranscript = '';
     let interimTranscript = '';
     
@@ -75,12 +119,10 @@ function startRecognition() {
       }
     }
     
-    // Display interim results locally
     if (interimTranscript.trim()) {
       displayCaption('You (Speaking)', interimTranscript);
     }
     
-    // Display and broadcast final results
     if (finalTranscript.trim()) {
       const username = getUsernameCallback ? getUsernameCallback() : 'You';
       displayCaption('You', finalTranscript);
@@ -94,22 +136,48 @@ function startRecognition() {
     console.error('Speech recognition error:', event.error);
     if (event.error === 'not-allowed') {
       stopRecognition();
+      if (typeof window.showToast === 'function') {
+        window.showToast('Microphone access denied for speech recognition.', 'warning');
+      }
     }
   };
   
   recognition.onend = () => {
-    // Automatically restart if it was active
-    if (isActive) {
-      try {
-        recognition.start();
-      } catch (e) {
-        console.warn('Speech recognition failed to restart:', e);
+    if (isActive && !(isMutedCallback && isMutedCallback())) {
+      const now = Date.now();
+      if (now - lastRestartTime < 2000) {
+        restartAttempts++;
+      } else {
+        restartAttempts = 0;
       }
+      lastRestartTime = now;
+      
+      if (restartAttempts >= 5) {
+        console.warn('Speech recognition dropped repeatedly. Aborting auto-restart.');
+        stopRecognition();
+        if (typeof window.showToast === 'function') {
+          window.showToast('Speech recognition service dropped out. Please check microphone permissions.', 'warning');
+        }
+        return;
+      }
+      
+      const delay = Math.min(5000, 100 + restartAttempts * 1000);
+      
+      setTimeout(() => {
+        if (isActive && !(isMutedCallback && isMutedCallback())) {
+          try {
+            recognition.start();
+          } catch (e) {
+            if (e.name !== 'InvalidStateError') {
+              console.warn('Speech recognition failed to restart in delayed loop:', e);
+            }
+          }
+        }
+      }, delay);
     } else {
-      const ccBtn = document.getElementById('ccBtn');
-      if (ccBtn) {
-        ccBtn.classList.remove('active');
-        ccBtn.style.color = '';
+      if (ui.ccBtn && !isActive) {
+        ui.ccBtn.classList.remove('active');
+        ui.ccBtn.style.color = '';
       }
     }
   };
@@ -124,13 +192,14 @@ function startRecognition() {
 function stopRecognition() {
   isActive = false;
   if (recognition) {
-    recognition.stop();
+    try {
+      recognition.stop();
+    } catch (e) {}
     recognition = null;
   }
-  const ccBtn = document.getElementById('ccBtn');
-  if (ccBtn) {
-    ccBtn.classList.remove('active');
-    ccBtn.style.color = '';
+  if (ui.ccBtn) {
+    ui.ccBtn.classList.remove('active');
+    ui.ccBtn.style.color = '';
   }
 }
 
@@ -141,4 +210,11 @@ function toggleCaptions() {
     isActive = true;
     startRecognition();
   }
+}
+
+export function cleanup() {
+  stopRecognition();
+  getUsernameCallback = null;
+  broadcastCallback = null;
+  isMutedCallback = null;
 }

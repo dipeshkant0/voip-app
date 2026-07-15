@@ -201,7 +201,9 @@ function loop() {
           targetFaceX = box.x + box.width / 2;
           targetFaceY = box.y + box.height / 2;
         }
-      }).catch(() => {});
+      }).catch((err) => {
+        console.debug('Face detection skipped/failed:', err);
+      });
     }
     
     // Smooth coordinates on *every* frame using a low-pass filter (Exponential Moving Average) to avoid jitter

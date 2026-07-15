@@ -168,11 +168,11 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "https://webrtc.github.io"],
+        scriptSrc: ["'self'", "https://webrtc.github.io", "https://cdnjs.cloudflare.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", 'data:'],
-        connectSrc: ["'self'", "stun:", "turn:", "wss:", "ws:", "https://*.metered.live", "https://api.twilio.com"],
+        connectSrc: ["'self'", "stun:", "turn:", "wss:", "ws:", "https://*.metered.live", "https://api.twilio.com", "https://ce.judge0.com"],
         mediaSrc: ["'self'", 'blob:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -192,6 +192,126 @@ app.get('/config.js', async (_req, res) => {
   } catch (error) {
     console.error('Config route error:', error);
     res.status(500).send('/* Config generation failed */');
+  }
+});
+
+app.use(express.json());
+
+const compileLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute window
+  max: 20,             // limit each IP to 20 compilations per minute
+  message: { error: 'Too many compilation requests. Please try again in a minute.' },
+  validate: false,
+  keyGenerator: (req) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    return forwarded ? forwarded.split(',')[0].trim() : req.socket.remoteAddress;
+  }
+});
+
+// Code execution compiler routing
+app.post('/api/compile', compileLimiter, async (req, res) => {
+  const { code, language, stdin } = req.body;
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ error: 'Code is required and must be a string' });
+  }
+  if (!language || typeof language !== 'string') {
+    return res.status(400).json({ error: 'Language is required and must be a string' });
+  }
+
+  const url = process.env.JUDGE0_API_URL || 'https://ce.judge0.com';
+  const apiKey = process.env.JUDGE0_API_KEY;
+
+  const judge0LanguageMap = {
+    javascript: 93,
+    python: 92,
+    c: 103,
+    cpp: 105,
+    rust: 108,
+    java: 91,
+    bash: 46
+  };
+
+  const languageId = judge0LanguageMap[language.toLowerCase()];
+  if (!languageId) {
+    return res.status(400).json({ error: `Language '${language}' is not supported` });
+  }
+
+  try {
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    if (apiKey) {
+      if (url.includes('rapidapi.com')) {
+        headers['X-RapidAPI-Key'] = apiKey;
+        headers['X-RapidAPI-Host'] = url.replace('https://', '').replace('http://', '').split('/')[0];
+      } else {
+        headers['X-Auth-Token'] = apiKey;
+      }
+    }
+
+    let compileRes = null;
+    let lastError = null;
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      try {
+        compileRes = await fetch(`${url}/submissions?wait=true`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            source_code: code,
+            language_id: languageId,
+            stdin: stdin || ''
+          }),
+          signal: controller.signal
+        });
+        // Break early on success or client-side errors (4xx)
+        if (compileRes.ok || compileRes.status < 500) {
+          break;
+        }
+
+        lastError = new Error(`HTTP ${compileRes.status}`);
+      } catch (err) {
+        lastError = err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (attempt < maxAttempts) {
+        const delay = attempt * 800; // backoff: 800ms, 1600ms
+        console.warn(`Proxy warning: Compiler fetch attempt ${attempt} failed. Retrying in ${delay}ms... Cause:`, lastError ? lastError.message : 'Unknown');
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    if (!compileRes) {
+      throw lastError || new Error('Connection failed after retry limit');
+    }
+
+    if (!compileRes.ok) {
+      const errorText = await compileRes.text();
+      console.error('Compiler execution failure status:', compileRes.status, errorText);
+      return res.status(500).json({ error: 'Compiler execution engine returned an error' });
+    }
+
+    const data = await compileRes.json();
+    const stdout = data.stdout || '';
+    const stderr = data.stderr || data.compile_output || '';
+    const exitCode = data.status && data.status.id === 3 ? 0 : 1;
+    const statusDescription = data.status ? data.status.description : 'Unknown';
+
+    let finalStderr = stderr;
+    if (exitCode !== 0 && !stderr && data.status) {
+      finalStderr = `Execution failed: ${statusDescription}`;
+    }
+
+    return res.json({ stdout, stderr: finalStderr, exitCode });
+  } catch (err) {
+    console.error('Compiler request error:', err);
+    return res.status(500).json({ error: 'Failed to contact compiler execution endpoint' });
   }
 });
 

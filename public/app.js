@@ -133,6 +133,7 @@ const state = {
   leaving: false,
   reconnecting: false,
   peers: new Map(), // peerId -> peerState
+  existingPeers: new Set(), // peers already in room when we joined
   username: '',
   audioAnalysers: new Map(), // peerId -> analyser
   videoEnabled: false,
@@ -356,6 +357,7 @@ function supportsRequiredApis() {
 }
 
 function showToast(message, type = 'info', ttl = 4000) {
+  window.showToast = showToast;
   const MAX_TOASTS = 8;
   while (ui.toastContainer.children.length >= MAX_TOASTS) {
     ui.toastContainer.firstElementChild.remove();
@@ -441,7 +443,9 @@ function clearLocalAudioAnalyser() {
   if (!state.audioAnalysers.has('local')) return;
   try {
     state.audioAnalysers.get('local').source.disconnect();
-  } catch (e) { }
+  } catch (e) {
+    console.debug('Local audio analyser source already disconnected or missing:', e);
+  }
   state.audioAnalysers.delete('local');
 
   if (speakerPollId && state.audioAnalysers.size === 0) {
@@ -649,7 +653,9 @@ function setupAudioAnalyser(stream, id) {
     if (state.audioAnalysers.has(id)) {
       try {
         state.audioAnalysers.get(id).source.disconnect();
-      } catch (e) { }
+      } catch (e) {
+        console.debug(`Audio source disconnect failed or missing for peer ${id}:`, e);
+      }
     }
 
     const source = state.audioContext.createMediaStreamSource(stream);
@@ -1100,6 +1106,10 @@ function syncPeerRoster(peerIds = [], usernames = {}) {
       .filter((peerId) => Boolean(peerId) && peerId !== socket.id)
   );
 
+  if (state.existingPeers.size === 0) {
+    desiredPeers.forEach((id) => state.existingPeers.add(id));
+  }
+
   [...state.peers.keys()].forEach((peerId) => {
     if (!desiredPeers.has(peerId)) {
       cleanupPeer(peerId, 'not in room roster');
@@ -1128,9 +1138,29 @@ function attachDataChannel(peerId, channel) {
     try {
       channel.send(JSON.stringify({ type: 'audio-state', enabled: isAudioEnabled }));
       channel.send(JSON.stringify({ type: 'video-state', enabled: state.videoEnabled }));
-      const textarea = document.getElementById('wbTextarea');
-      if (textarea && textarea.value.trim()) {
-        channel.send(JSON.stringify({ type: 'wb-text', content: textarea.value }));
+      if (!state.existingPeers.has(peerId)) {
+        const textarea = document.getElementById('wbTextarea');
+        if (textarea && textarea.value.trim()) {
+          channel.send(JSON.stringify({ type: 'wb-text', content: textarea.value }));
+        }
+        if (typeof whiteboard.getCanvasDataURL === 'function') {
+          const dataURL = whiteboard.getCanvasDataURL();
+          if (dataURL) {
+            channel.send(JSON.stringify({ type: 'wb-canvas-image', dataURL }));
+          }
+        }
+        if (typeof whiteboard.getActiveEditorMode === 'function') {
+          const currentMode = whiteboard.getActiveEditorMode();
+          if (currentMode === 'code') {
+            channel.send(JSON.stringify({ type: 'wb-editor-mode', mode: 'code' }));
+            const currentLang = whiteboard.getActiveLanguage();
+            channel.send(JSON.stringify({ type: 'wb-editor-lang', lang: currentLang }));
+            const currentStdin = whiteboard.getActiveStdin();
+            if (currentStdin.trim()) {
+              channel.send(JSON.stringify({ type: 'wb-editor-stdin', content: currentStdin }));
+            }
+          }
+        }
       }
     } catch (e) {
       console.warn('Failed to send initial state:', e);
@@ -1171,6 +1201,10 @@ function attachDataChannel(peerId, channel) {
           whiteboard.handleIncomingDraw(msg);
         } else if (msg.type === 'wb-clear') {
           whiteboard.clearCanvas();
+        } else if (msg.type === 'wb-canvas-image') {
+          if (typeof whiteboard.loadCanvasImage === 'function') {
+            whiteboard.loadCanvasImage(msg.dataURL);
+          }
         } else if (msg.type === 'wb-text') {
           const username = peer.username || 'Peer';
           whiteboard.handleIncomingText(msg.content, msg.caretIndex, username, peerId);
@@ -1180,6 +1214,16 @@ function attachDataChannel(peerId, channel) {
         } else if (msg.type === 'wb-text-cursor') {
           const username = peer.username || 'Peer';
           whiteboard.handleIncomingTextCursor(peerId, msg, username);
+        } else if (msg.type === 'wb-editor-mode') {
+          whiteboard.handleIncomingEditorMode(msg.mode);
+        } else if (msg.type === 'wb-editor-lang') {
+          whiteboard.handleIncomingEditorLang(msg.lang);
+        } else if (msg.type === 'wb-editor-stdin') {
+          whiteboard.handleIncomingStdin(msg.content);
+        } else if (msg.type === 'wb-compile-start') {
+          whiteboard.handleIncomingCompileStart();
+        } else if (msg.type === 'wb-compile-result') {
+          whiteboard.handleIncomingCompileResult(msg);
         } else if (msg.type === 'caption') {
           captions.displayCaption(msg.username || 'Peer', msg.text);
         } else if (msg.type === 'file-meta') {
@@ -1446,7 +1490,20 @@ function ensurePeer(peerId, providedUsername = null) {
 
   pc.oniceconnectionstatechange = () => {
     if (pc.iceConnectionState === 'failed') {
-      cleanupPeer(peerId, 'ICE network blocked');
+      console.warn(`ICE failed for peer ${peerId}. Initiating automatic ICE restart...`);
+      try {
+        if (typeof pc.restartIce === 'function') {
+          pc.restartIce();
+        } else {
+          pc.createOffer({ iceRestart: true }).then(offer => {
+            pc.setLocalDescription(offer);
+            socket.emit('webrtc-offer', { target: peerId, sdp: offer });
+          });
+        }
+      } catch (err) {
+        console.error('ICE restart attempt failed:', err);
+        cleanupPeer(peerId, 'ICE network blocked');
+      }
     }
   };
 
@@ -1596,7 +1653,9 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
       peer.dataChannel.onclose = null;
       peer.dataChannel.onerror = null;
       peer.dataChannel.close();
-    } catch (_error) { }
+    } catch (_error) {
+      console.debug(`DataChannel close failed for peer ${peerId}:`, _error);
+    }
   }
 
   peer.signalingQueue = Promise.resolve();
@@ -1611,13 +1670,17 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
       peer.pc.onsignalingstatechange = null;
       peer.pc.onnegotiationneeded = null;
       peer.pc.close();
-    } catch (_error) { }
+    } catch (_error) {
+      console.debug(`PeerConnection close failed for peer ${peerId}:`, _error);
+    }
   }
 
   if (state.audioAnalysers.has(peerId)) {
     try {
       state.audioAnalysers.get(peerId).source.disconnect();
-    } catch (e) { }
+    } catch (e) {
+      console.debug(`Audio source disconnect failed for peer ${peerId}:`, e);
+    }
     state.audioAnalysers.delete(peerId);
   }
 
@@ -1684,7 +1747,9 @@ function leaveRoom(options = {}) {
   // Reset visual filter
   try {
     filters.processTrack(null);
-  } catch (e) {}
+  } catch (e) {
+    console.debug('Failed to reset visual filter during leaveRoom:', e);
+  }
   const filterDropdown = document.getElementById('filterDropdown');
   if (filterDropdown) {
     filterDropdown.style.display = 'none';
@@ -1700,7 +1765,12 @@ function leaveRoom(options = {}) {
   if (ui.whiteboardBtn) ui.whiteboardBtn.classList.remove('active');
   try {
     whiteboard.clearCanvas();
-  } catch (e) {}
+    if (typeof whiteboard.cleanup === 'function') {
+      whiteboard.cleanup();
+    }
+  } catch (e) {
+    console.debug('Failed to clear canvas or cleanup whiteboard:', e);
+  }
   const textarea = document.getElementById('wbTextarea');
   if (textarea) textarea.value = '';
 
@@ -1720,12 +1790,20 @@ function leaveRoom(options = {}) {
       if (ui.ccBtn && ui.ccBtn.classList.contains('active')) {
         ui.ccBtn.click();
       }
-    } catch (e) {}
+    } catch (e) {
+      console.debug('Failed to toggle captions off on leaveRoom:', e);
+    }
   }
 
   // Turn off stats if active
-  if (ui.statsBtn && ui.statsBtn.classList.contains('active')) {
+  if (typeof stats.cleanup === 'function') {
+    stats.cleanup();
+  } else if (ui.statsBtn && ui.statsBtn.classList.contains('active')) {
     ui.statsBtn.click();
+  }
+
+  if (typeof captions.cleanup === 'function') {
+    captions.cleanup();
   }
 
   unfocusVideo();
@@ -1738,6 +1816,13 @@ function leaveRoom(options = {}) {
   state.roomPassword = '';
   state.selectedDeviceId = '';
   state.videoEnabled = false;
+  state.existingPeers.clear();
+  if (state.audioContext) {
+    if (state.audioContext.state !== 'closed') {
+      state.audioContext.close().catch(() => {});
+    }
+    state.audioContext = null;
+  }
   ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; ui.videoBtn.classList.remove('active');
   setMode('join');
   setRoomChip('Not joined');
@@ -2283,7 +2368,9 @@ function turnOffVideo() {
   rebuildLocalStream(currentTrack(), null);
   try {
     filters.processTrack(null);
-  } catch (e) {}
+  } catch (e) {
+    console.debug('Failed to reset visual filter on turnOffVideo:', e);
+  }
   if (previousVideoTrack) previousVideoTrack.stop();
   updateLocalVideoPreview();
   
@@ -2457,7 +2544,6 @@ function stopScreenShare() {
   ui.screenShareBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>`; 
   ui.screenShareBtn.classList.remove('active');
   ui.screenShareBtn.classList.remove('danger');
-  ui.screenShareBtn.classList.remove('btn-danger'); // to handle both potential classes used historically
 
   updateLocalVideoPreview();
   applyLocalTracksToAllPeers();
@@ -2482,6 +2568,10 @@ function toggleMute() {
   updateMuteButton();
   refreshRoomStatus();
   showToast(track.enabled ? 'Microphone unmuted.' : 'Microphone muted.', 'info', 1800);
+
+  if (typeof captions.syncMuteState === 'function') {
+    captions.syncMuteState(!track.enabled);
+  }
 
   socket.emit('media-state-change', {
     type: 'audio',
@@ -2981,9 +3071,16 @@ whiteboard.init((data) => {
   broadcastDataChannelMessage(data);
 });
 
-captions.init((data) => {
-  broadcastDataChannelMessage(data);
-}, () => state.username);
+captions.init(
+  (data) => {
+    broadcastDataChannelMessage(data);
+  },
+  () => state.username,
+  () => {
+    const track = currentTrack();
+    return !track || !track.enabled;
+  }
+);
 
 stats.init(() => state.peers);
 
