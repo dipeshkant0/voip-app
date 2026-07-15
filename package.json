@@ -4,8 +4,8 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js"
+    "build": "esbuild public/app.js --bundle --sourcemap --outfile=public/dist/bundle.js",
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",

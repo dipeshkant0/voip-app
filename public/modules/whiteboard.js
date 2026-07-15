@@ -58,6 +58,10 @@ const peerTextCursorTimeouts = new Map();
 let cursorThrottleTimeout = null;
 let textCursorThrottleTimeout = null;
 let codeCursorThrottleTimeout = null;
+let resizeFrameId = null;
+let breakpointFrameId = null;
+let cmScrollFrameId = null;
+let textareaScrollFrameId = null;
 let isProgrammaticUpdate = false;
 
 let textarea = null;
@@ -71,6 +75,8 @@ let modeTextBtn = null;
 let modeCodeBtn = null;
 let codeControls = null;
 let languageSelect = null;
+let runBtn = null;
+let clearTerminalBtn = null;
 
 let lastTextBroadcastTime = 0;
 let pendingTextBroadcast = null;
@@ -78,6 +84,9 @@ let lastSentText = '';
 let mimicDiv = null;
 let activeEditorMode = 'text';
 let breakpointResizeHandler = null;
+let cachedTextareaStyles = null;
+let workspaceResizeHandler = null;
+let cmRetries = 0;
 
 const getDefaultCodePlaceholder = (lang) => {
   const commentStyle = (lang === 'python' || lang === 'bash') ? '#' : '//';
@@ -250,6 +259,20 @@ function handleCursorMove(x, y, active = true) {
   }
 }
 
+function cacheTextareaStyles() {
+  if (!textarea) return;
+  const style = window.getComputedStyle(textarea);
+  const properties = [
+    'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontVariant', 'fontStretch',
+    'lineHeight', 'wordWrap', 'whiteSpace', 'paddingTop', 'paddingRight', 'paddingBottom',
+    'paddingLeft', 'borderStyle', 'borderWidth', 'boxSizing'
+  ];
+  cachedTextareaStyles = {};
+  properties.forEach(prop => {
+    cachedTextareaStyles[prop] = style[prop];
+  });
+}
+
 export function init(broadcastFn) {
   broadcastCallback = broadcastFn;
   
@@ -265,15 +288,25 @@ export function init(broadcastFn) {
   modeCodeBtn = document.getElementById('wbModeCodeBtn');
   codeControls = document.getElementById('wbCodeControls');
   languageSelect = document.getElementById('wbLanguageSelect');
+  runBtn = document.getElementById('wbRunBtn');
+  clearTerminalBtn = document.getElementById('wbClearTerminalBtn');
   
   if (!canvas) return;
   
   ctx = canvas.getContext('2d');
   
   // Set up resize handler to keep drawing data if resized
+  workspaceResizeHandler = () => {
+    if (resizeFrameId) return;
+    resizeFrameId = requestAnimationFrame(() => {
+      resizeCanvas();
+      cacheTextareaStyles();
+      resizeFrameId = null;
+    });
+  };
+  window.addEventListener('resize', workspaceResizeHandler);
   resizeCanvas();
-  window.removeEventListener('resize', resizeCanvas);
-  window.addEventListener('resize', resizeCanvas);
+  cacheTextareaStyles();
   
   // Event listeners for drawing (Mouse)
   canvas.addEventListener('mousedown', startDrawing);
@@ -295,9 +328,7 @@ export function init(broadcastFn) {
   });
   
   canvas.addEventListener('mouseleave', () => {
-    if (broadcastCallback) {
-      broadcastCallback({ type: 'wb-cursor', active: false });
-    }
+    handleCursorMove(0, 0, false);
   });
   
   canvas.addEventListener('touchmove', (e) => {
@@ -309,9 +340,7 @@ export function init(broadcastFn) {
   }, { passive: true });
   
   canvas.addEventListener('touchend', () => {
-    if (broadcastCallback) {
-      broadcastCallback({ type: 'wb-cursor', active: false });
-    }
+    handleCursorMove(0, 0, false);
   }, { passive: true });
   
   // Controls
@@ -405,6 +434,10 @@ export function init(broadcastFn) {
       if (!codeTextarea) return;
              
       if (typeof CodeMirror === 'undefined') {
+        if (cmRetries++ > 40) {
+          console.error('CodeMirror failed to load.');
+          return;
+        }
         setTimeout(initCodeMirror, 50);
         return;
       }
@@ -482,7 +515,11 @@ export function init(broadcastFn) {
       });
 
       codeMirrorInstance.on('scroll', () => {
-        repositionAllRemoteCursors();
+        if (cmScrollFrameId) return;
+        cmScrollFrameId = requestAnimationFrame(() => {
+          repositionAllRemoteCursors();
+          cmScrollFrameId = null;
+        });
       });
 
       // Initialize default font size
@@ -725,21 +762,25 @@ export function init(broadcastFn) {
 
     let lastWidth = window.innerWidth;
     breakpointResizeHandler = () => {
-      const currentWidth = window.innerWidth;
-      if ((lastWidth <= 992 && currentWidth > 992) || (lastWidth > 992 && currentWidth <= 992)) {
-        if (codeEditorWrapper) {
-          codeEditorWrapper.style.width = '';
-          codeEditorWrapper.style.height = '';
+      if (breakpointFrameId) return;
+      breakpointFrameId = requestAnimationFrame(() => {
+        const currentWidth = window.innerWidth;
+        if ((lastWidth <= 992 && currentWidth > 992) || (lastWidth > 992 && currentWidth <= 992)) {
+          if (codeEditorWrapper) {
+            codeEditorWrapper.style.width = '';
+            codeEditorWrapper.style.height = '';
+          }
+          if (terminalContainer) {
+            terminalContainer.style.width = '';
+            terminalContainer.style.height = '';
+          }
+          adjustResponsiveWorkspace();
+        } else {
+          repositionAllRemoteCursors();
         }
-        if (terminalContainer) {
-          terminalContainer.style.width = '';
-          terminalContainer.style.height = '';
-        }
-        adjustResponsiveWorkspace();
-      } else {
-        repositionAllRemoteCursors();
-      }
-      lastWidth = currentWidth;
+        lastWidth = currentWidth;
+        breakpointFrameId = null;
+      });
     };
     window.addEventListener('resize', breakpointResizeHandler);
 
@@ -868,39 +909,78 @@ export function init(broadcastFn) {
               exitCode: result.exitCode
             });
           }
+          runBtn.disabled = false;
         } catch (err) {
           if (language.toLowerCase() === 'javascript') {
             terminal.textContent = 'Notice: Remote compiler offline. Initiating offline JavaScript sandbox...\n\n';
             terminal.style.color = '#e9b872';
             try {
-              let logs = [];
-              const customConsole = {
-                log: (...args) => logs.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')),
-                error: (...args) => logs.push('Error: ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')),
-                warn: (...args) => logs.push('Warning: ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' '))
-              };
-
-              const runFn = new Function('console', `
+              const blobCode = `
+                self.fetch = undefined;
+                self.XMLHttpRequest = undefined;
+                self.WebSocket = undefined;
+                self.importScripts = undefined;
+                
+                const logs = [];
+                const customConsole = {
+                  log: (...args) => logs.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')),
+                  error: (...args) => logs.push('Error: ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')),
+                  warn: (...args) => logs.push('Warning: ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' '))
+                };
+                
                 try {
-                  ${code}
+                  const runFn = new Function('console', \`
+                    try {
+                      ${code.replace(/`/g, '\\`').replace(/\$/g, '\\$')}
+                    } catch (e) {
+                      console.error(e.message);
+                    }
+                  \`);
+                  runFn(customConsole);
+                  self.postMessage({ logs, error: null });
                 } catch (e) {
-                  console.error(e.message);
+                  self.postMessage({ logs, error: e.message });
                 }
-              `);
+              `;
               
-              runFn(customConsole);
-              const outputText = logs.length ? logs.join('\n') : 'Process executed successfully with no stdout output.';
-              terminal.textContent += outputText;
-              terminal.style.color = '#39ff14';
+              const blob = new Blob([blobCode], { type: 'application/javascript' });
+              const workerURL = URL.createObjectURL(blob);
+              const worker = new Worker(workerURL);
               
-              if (broadcastCallback) {
-                broadcastCallback({
-                  type: 'wb-compile-result',
-                  stdout: outputText,
-                  stderr: '',
-                  exitCode: 0
-                });
-              }
+              const timeoutId = setTimeout(() => {
+                worker.terminate();
+                URL.revokeObjectURL(workerURL);
+                terminal.textContent += 'Error: Execution timed out (exceeded 3 seconds).';
+                terminal.style.color = '#ff3333';
+                runBtn.disabled = false;
+              }, 3000);
+              
+              worker.onmessage = (event) => {
+                clearTimeout(timeoutId);
+                worker.terminate();
+                URL.revokeObjectURL(workerURL);
+                
+                const { logs: workerLogs, error } = event.data;
+                let outputText = workerLogs.length ? workerLogs.join('\n') : 'Process executed successfully with no stdout output.';
+                if (error) {
+                  outputText += '\nExecution error: ' + error;
+                }
+                
+                terminal.textContent += outputText;
+                terminal.style.color = error ? '#ff3333' : '#39ff14';
+                
+                if (broadcastCallback) {
+                  broadcastCallback({
+                    type: 'wb-compile-result',
+                    stdout: outputText,
+                    stderr: error || '',
+                    exitCode: error ? 1 : 0
+                  });
+                }
+                runBtn.disabled = false;
+              };
+              
+              worker.postMessage('run');
               return;
             } catch (jsErr) {
               terminal.textContent += `Offline execution failure: ${jsErr.message}`;
@@ -919,7 +999,6 @@ export function init(broadcastFn) {
               exitCode: 1
             });
           }
-        } finally {
           runBtn.disabled = false;
         }
       });
@@ -973,7 +1052,11 @@ export function init(broadcastFn) {
     
     // Re-position other users' cursors on scroll
     textarea.addEventListener('scroll', () => {
-      repositionAllRemoteCursors();
+      if (textareaScrollFrameId) return;
+      textareaScrollFrameId = requestAnimationFrame(() => {
+        repositionAllRemoteCursors();
+        textareaScrollFrameId = null;
+      });
     });
   }
   
@@ -1110,8 +1193,26 @@ function resizeCanvas() {
   if (!canvas) return;
   
   const rect = canvas.parentElement.getBoundingClientRect();
-  const width = Math.floor(rect.width) || 800;
-  const height = Math.floor(rect.height) || 600;
+  const parentWidth = Math.floor(rect.width) || 800;
+  const parentHeight = Math.floor(rect.height) || 600;
+  
+  // Enforce 16:9 aspect ratio
+  const targetRatio = 16 / 9;
+  let width = parentWidth;
+  let height = Math.floor(width / targetRatio);
+  
+  if (height > parentHeight) {
+    height = parentHeight;
+    width = Math.floor(height * targetRatio);
+  }
+  
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  
+  if (cursorContainer) {
+    cursorContainer.style.width = `${width}px`;
+    cursorContainer.style.height = `${height}px`;
+  }
   
   if (canvas.width === width && canvas.height === height) return;
   
@@ -1519,16 +1620,14 @@ function getCaretCoordinates(element, position) {
     document.body.appendChild(mimicDiv);
   }
   
-  const style = window.getComputedStyle(element);
-  const properties = [
-    'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontVariant', 'fontStretch',
-    'lineHeight', 'wordWrap', 'whiteSpace', 'paddingTop', 'paddingRight', 'paddingBottom',
-    'paddingLeft', 'borderStyle', 'borderWidth', 'boxSizing'
-  ];
-  
-  properties.forEach(prop => {
-    mimicDiv.style[prop] = style[prop];
-  });
+  if (!cachedTextareaStyles) {
+    cacheTextareaStyles();
+  }
+  if (cachedTextareaStyles) {
+    Object.keys(cachedTextareaStyles).forEach(prop => {
+      mimicDiv.style[prop] = cachedTextareaStyles[prop];
+    });
+  }
   
   // Dynamically synchronize size and position to match element dimensions
   const rect = element.getBoundingClientRect();
@@ -1711,10 +1810,22 @@ export function handleIncomingStdin(content) {
 }
 
 export function cleanup() {
-  window.removeEventListener('resize', resizeCanvas);
+  if (workspaceResizeHandler) {
+    window.removeEventListener('resize', workspaceResizeHandler);
+    workspaceResizeHandler = null;
+  }
   if (breakpointResizeHandler) {
     window.removeEventListener('resize', breakpointResizeHandler);
     breakpointResizeHandler = null;
+  }
+  
+  if (codeMirrorInstance) {
+    try {
+      codeMirrorInstance.toTextArea();
+    } catch (e) {
+      console.debug('Failed to tear down CodeMirror instance:', e);
+    }
+    codeMirrorInstance = null;
   }
   
   const cursorContainer = document.getElementById('wbCursorContainer');
@@ -1766,6 +1877,34 @@ export function cleanup() {
   if (pendingStdinBroadcast) {
     clearTimeout(pendingStdinBroadcast);
     pendingStdinBroadcast = null;
+  }
+  if (cursorThrottleTimeout) {
+    clearTimeout(cursorThrottleTimeout);
+    cursorThrottleTimeout = null;
+  }
+  if (textCursorThrottleTimeout) {
+    clearTimeout(textCursorThrottleTimeout);
+    textCursorThrottleTimeout = null;
+  }
+  if (codeCursorThrottleTimeout) {
+    clearTimeout(codeCursorThrottleTimeout);
+    codeCursorThrottleTimeout = null;
+  }
+  if (resizeFrameId) {
+    cancelAnimationFrame(resizeFrameId);
+    resizeFrameId = null;
+  }
+  if (breakpointFrameId) {
+    cancelAnimationFrame(breakpointFrameId);
+    breakpointFrameId = null;
+  }
+  if (cmScrollFrameId) {
+    cancelAnimationFrame(cmScrollFrameId);
+    cmScrollFrameId = null;
+  }
+  if (textareaScrollFrameId) {
+    cancelAnimationFrame(textareaScrollFrameId);
+    textareaScrollFrameId = null;
   }
 }
 

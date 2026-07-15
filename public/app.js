@@ -11,7 +11,16 @@ const DEFAULT_ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:global.stun.twilio.com:3478' }
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp'
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  }
 ];
 
 function normalizeIceServers(servers) {
@@ -121,6 +130,26 @@ async function decryptMessage(key, encryptedBase64, ivBase64) {
 // ------------------------------------------------
 
 const typingUsers = new Set();
+
+function updateTypingIndicator() {
+  const typingIndicator = document.getElementById('typingIndicator');
+  if (!typingIndicator) return;
+  
+  if (typingUsers.size === 0) {
+    typingIndicator.style.display = 'none';
+    typingIndicator.textContent = '';
+  } else {
+    typingIndicator.style.display = 'block';
+    if (typingUsers.size === 1) {
+      typingIndicator.textContent = `${Array.from(typingUsers)[0]} is typing...`;
+    } else if (typingUsers.size === 2) {
+      typingIndicator.textContent = `${Array.from(typingUsers).join(' and ')} are typing...`;
+    } else {
+      typingIndicator.textContent = 'Multiple people are typing...';
+    }
+  }
+}
+
 const state = {
   e2eeKey: null,
   roomId: '',
@@ -154,7 +183,7 @@ let recordingTabAudioSource = null;
 let recordingMicAudioSource = null;
 let recordingFileHandle = null;
 let recordingWritableStream = null;
-let speakerPollId = null;
+let speakerPollIntervalId = null;
 let activeBlobUrls = [];
 
 const MAX_CHAT_MESSAGES = 200;
@@ -448,9 +477,9 @@ function clearLocalAudioAnalyser() {
   }
   state.audioAnalysers.delete('local');
 
-  if (speakerPollId && state.audioAnalysers.size === 0) {
-    cancelAnimationFrame(speakerPollId);
-    speakerPollId = null;
+  if (speakerPollIntervalId && state.audioAnalysers.size === 0) {
+    clearInterval(speakerPollIntervalId);
+    speakerPollIntervalId = null;
   }
 }
 
@@ -669,26 +698,22 @@ function setupAudioAnalyser(stream, id) {
     const videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
     state.audioAnalysers.set(id, { analyser, source, dataArray, participantEl, videoWrapperEl });
 
-    if (!speakerPollId) {
-      pollActiveSpeakers();
+    if (!speakerPollIntervalId) {
+      speakerPollIntervalId = setInterval(pollActiveSpeakers, 100);
     }
   } catch (error) {
     console.warn('Could not setup audio analyser:', error);
   }
 }
 
-let lastPollTime = 0;
-function pollActiveSpeakers(timestamp) {
+function pollActiveSpeakers() {
   if (state.audioAnalysers.size === 0) {
-    speakerPollId = null;
+    if (speakerPollIntervalId) {
+      clearInterval(speakerPollIntervalId);
+      speakerPollIntervalId = null;
+    }
     return;
   }
-
-  speakerPollId = requestAnimationFrame(pollActiveSpeakers);
-
-  if (!timestamp) timestamp = performance.now();
-  if (timestamp - lastPollTime < 100) return;
-  lastPollTime = timestamp;
 
   state.audioAnalysers.forEach((analyserData, id) => {
     const { analyser, dataArray } = analyserData;
@@ -712,12 +737,11 @@ function pollActiveSpeakers(timestamp) {
 }
 
 function getAudioConstraints(deviceId = '', exactDevice = false) {
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   return {
     deviceId: deviceId ? { [exactDevice ? 'exact' : 'ideal']: deviceId } : undefined,
     echoCancellation: true,
-    noiseSuppression: isMobile ? false : true,
-    autoGainControl: isMobile ? false : true,
+    noiseSuppression: true,
+    autoGainControl: true,
     sampleRate: { ideal: 48000 },
     channelCount: { ideal: 1 },
   };
@@ -1127,6 +1151,7 @@ function attachDataChannel(peerId, channel) {
   const peer = getPeerState(peerId);
   if (!peer) return;
 
+  channel.bufferedAmountLowThreshold = 65536; // 64 KB baseline buffer line
   peer.dataChannel = channel;
 
   channel.onopen = () => {
@@ -1139,25 +1164,31 @@ function attachDataChannel(peerId, channel) {
       channel.send(JSON.stringify({ type: 'audio-state', enabled: isAudioEnabled }));
       channel.send(JSON.stringify({ type: 'video-state', enabled: state.videoEnabled }));
       if (!state.existingPeers.has(peerId)) {
-        const textarea = document.getElementById('wbTextarea');
-        if (textarea && textarea.value.trim()) {
-          channel.send(JSON.stringify({ type: 'wb-text', content: textarea.value }));
-        }
-        if (typeof whiteboard.getCanvasDataURL === 'function') {
-          const dataURL = whiteboard.getCanvasDataURL();
-          if (dataURL) {
-            channel.send(JSON.stringify({ type: 'wb-canvas-image', dataURL }));
+        const hostCandidates = [socket.id, ...state.existingPeers];
+        hostCandidates.sort();
+        const isHost = (socket.id === hostCandidates[0]);
+        
+        if (isHost) {
+          const textarea = document.getElementById('wbTextarea');
+          if (textarea && textarea.value.trim()) {
+            channel.send(JSON.stringify({ type: 'wb-text', content: textarea.value }));
           }
-        }
-        if (typeof whiteboard.getActiveEditorMode === 'function') {
-          const currentMode = whiteboard.getActiveEditorMode();
-          if (currentMode === 'code') {
-            channel.send(JSON.stringify({ type: 'wb-editor-mode', mode: 'code' }));
-            const currentLang = whiteboard.getActiveLanguage();
-            channel.send(JSON.stringify({ type: 'wb-editor-lang', lang: currentLang }));
-            const currentStdin = whiteboard.getActiveStdin();
-            if (currentStdin.trim()) {
-              channel.send(JSON.stringify({ type: 'wb-editor-stdin', content: currentStdin }));
+          if (typeof whiteboard.getCanvasDataURL === 'function') {
+            const dataURL = whiteboard.getCanvasDataURL();
+            if (dataURL) {
+              channel.send(JSON.stringify({ type: 'wb-canvas-image', dataURL }));
+            }
+          }
+          if (typeof whiteboard.getActiveEditorMode === 'function') {
+            const currentMode = whiteboard.getActiveEditorMode();
+            if (currentMode === 'code') {
+              channel.send(JSON.stringify({ type: 'wb-editor-mode', mode: 'code' }));
+              const currentLang = whiteboard.getActiveLanguage();
+              channel.send(JSON.stringify({ type: 'wb-editor-lang', lang: currentLang }));
+              const currentStdin = whiteboard.getActiveStdin();
+              if (currentStdin.trim()) {
+                channel.send(JSON.stringify({ type: 'wb-editor-stdin', content: currentStdin }));
+              }
             }
           }
         }
@@ -1566,6 +1597,9 @@ function applyLocalTracksToPeer(peerId) {
     }
   } else if (audioTransceiver) {
     audioTransceiver.sender.replaceTrack(null).catch(() => { });
+    if (audioTransceiver.direction !== 'recvonly' && audioTransceiver.direction !== 'inactive') {
+      audioTransceiver.direction = 'recvonly';
+    }
   }
 
   // 2. Handle Video Track
@@ -1601,6 +1635,9 @@ function applyLocalTracksToPeer(peerId) {
     }
   } else if (videoTransceiver) {
     videoTransceiver.sender.replaceTrack(null).catch(() => { });
+    if (videoTransceiver.direction !== 'recvonly' && videoTransceiver.direction !== 'inactive') {
+      videoTransceiver.direction = 'recvonly';
+    }
   }
 }
 
@@ -1620,21 +1657,10 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
 
   if (peer.typingTimeout) {
     clearTimeout(peer.typingTimeout);
-    const userName = peer.username || 'Someone';
-    if (typeof typingUsers !== 'undefined' && typingUsers.has(userName)) {
+    const userName = peer.typingUsername || peer.username || 'Someone';
+    if (typingUsers.has(userName)) {
       typingUsers.delete(userName);
-      const typingIndicator = document.getElementById('typingIndicator');
-      if (typingIndicator) {
-        if (typingUsers.size === 0) {
-          typingIndicator.style.display = 'none';
-        } else if (typingUsers.size === 1) {
-          typingIndicator.textContent = `${Array.from(typingUsers)[0]} is typing...`;
-        } else if (typingUsers.size === 2) {
-          typingIndicator.textContent = `${Array.from(typingUsers).join(' and ')} are typing...`;
-        } else {
-          typingIndicator.textContent = 'Multiple people are typing...';
-        }
-      }
+      updateTypingIndicator();
     }
   }
 
@@ -1661,6 +1687,20 @@ function cleanupPeer(peerId, reason = '', skipRefresh = false) {
   peer.signalingQueue = Promise.resolve();
 
   if (peer.pc) {
+    try {
+      peer.pc.getReceivers().forEach(receiver => {
+        if (receiver.track) {
+          try { receiver.track.stop(); } catch (e) {}
+        }
+      });
+      peer.pc.getSenders().forEach(sender => {
+        if (sender.track && peer.pc.signalingState !== 'closed') {
+          try { peer.pc.removeTrack(sender); } catch (e) {}
+        }
+      });
+    } catch (e) {
+      console.debug(`Failed to stop tracks/receivers for peer ${peerId}:`, e);
+    }
     try {
       peer.pc.onicecandidate = null;
       peer.pc.ontrack = null;
@@ -1817,6 +1857,17 @@ function leaveRoom(options = {}) {
   state.selectedDeviceId = '';
   state.videoEnabled = false;
   state.existingPeers.clear();
+  
+  if (speakerPollIntervalId) {
+    clearInterval(speakerPollIntervalId);
+    speakerPollIntervalId = null;
+  }
+  
+  state.audioAnalysers.forEach(data => {
+    try { data.source.disconnect(); } catch (e) {}
+  });
+  state.audioAnalysers.clear();
+
   if (state.audioContext) {
     if (state.audioContext.state !== 'closed') {
       state.audioContext.close().catch(() => {});
@@ -1900,7 +1951,7 @@ async function acquireMicrophone(deviceId = '', options = {}, isRetry = false) {
       if (!silent) {
         showToast('Selected microphone is unavailable. Trying the default device.', 'warning');
       }
-      return acquireMicrophone('', { silent, required, exactDevice: false, allowFallback: false }, true);
+      return await acquireMicrophone('', { silent, required, exactDevice: false, allowFallback: false }, true);
     }
 
     console.warn('Microphone access failed:', error);
@@ -2639,7 +2690,8 @@ async function copyInviteLink() {
 }
 
 function initializeFromQuery() {
-  const hashParams = new URLSearchParams(window.location.hash.substring(1));
+  const hash = window.location.hash.startsWith('#') ? window.location.hash.substring(1) : window.location.hash;
+  const hashParams = new URLSearchParams(hash);
   const queryParams = new URLSearchParams(window.location.search);
   
   const roomFromUrl = hashParams.get('room') || queryParams.get('room');
@@ -2651,7 +2703,11 @@ function initializeFromQuery() {
   if (pwdFromUrl) {
     ui.passwordInput.value = pwdFromUrl;
   }
+  setRoomChip(ui.roomInput.value || 'Not joined');
 }
+
+window.addEventListener('hashchange', initializeFromQuery);
+window.addEventListener('popstate', initializeFromQuery);
 
 socket.on('connect', () => {
   setSocketStateLabel('connected');
@@ -2737,6 +2793,20 @@ socket.on('room-chat-message', async (data) => {
       try {
         const msg = JSON.parse(decryptedText);
         appendMessage(msg.text, false, msg.username || 'Anonymous');
+        
+        // Remove sender from typing list immediately on message arrival
+        const senderUsername = msg.username;
+        if (senderUsername && typingUsers.has(senderUsername)) {
+          typingUsers.delete(senderUsername);
+          updateTypingIndicator();
+        }
+        if (data.senderId) {
+          const peer = state.peers.get(data.senderId);
+          if (peer && peer.typingTimeout) {
+            clearTimeout(peer.typingTimeout);
+            peer.typingTimeout = null;
+          }
+        }
       } catch (e) {
         // Drop malformed JSON
       }
@@ -2745,6 +2815,20 @@ socket.on('room-chat-message', async (data) => {
     }
   } else if (data && data.text) {
     appendMessage(data.text, false, data.username || 'Anonymous');
+    
+    // Remove sender from typing list immediately on message arrival
+    const senderUsername = data.username;
+    if (senderUsername && typingUsers.has(senderUsername)) {
+      typingUsers.delete(senderUsername);
+      updateTypingIndicator();
+    }
+    if (data.senderId) {
+      const peer = state.peers.get(data.senderId);
+      if (peer && peer.typingTimeout) {
+        clearTimeout(peer.typingTimeout);
+        peer.typingTimeout = null;
+      }
+    }
   }
 });
 
@@ -2793,34 +2877,17 @@ socket.on('typing', (data) => {
   const peer = state.peers.get(peerId);
   if (!peer) return;
 
-  const typingIndicator = document.getElementById('typingIndicator');
-  if (typingIndicator) {
-    const userName = data.username || peer.username || 'Someone';
-    typingUsers.add(userName);
-    
-    if (typingUsers.size === 1) {
-      typingIndicator.textContent = `${Array.from(typingUsers)[0]} is typing...`;
-    } else if (typingUsers.size === 2) {
-      typingIndicator.textContent = `${Array.from(typingUsers).join(' and ')} are typing...`;
-    } else {
-      typingIndicator.textContent = 'Multiple people are typing...';
-    }
-    
-    typingIndicator.style.display = 'block';
-    clearTimeout(peer.typingTimeout);
-    peer.typingTimeout = setTimeout(() => {
-      typingUsers.delete(userName);
-      if (typingUsers.size === 0) {
-        typingIndicator.style.display = 'none';
-      } else if (typingUsers.size === 1) {
-        typingIndicator.textContent = `${Array.from(typingUsers)[0]} is typing...`;
-      } else if (typingUsers.size === 2) {
-        typingIndicator.textContent = `${Array.from(typingUsers).join(' and ')} are typing...`;
-      } else {
-        typingIndicator.textContent = 'Multiple people are typing...';
-      }
-    }, 3000);
-  }
+  const userName = data.username || peer.username || 'Someone';
+  peer.typingUsername = userName;
+  typingUsers.add(userName);
+  updateTypingIndicator();
+  
+  clearTimeout(peer.typingTimeout);
+  peer.typingTimeout = setTimeout(() => {
+    typingUsers.delete(userName);
+    updateTypingIndicator();
+    peer.typingTimeout = null;
+  }, 3000);
 });
 
 ui.joinBtn.addEventListener('click', joinRoom);
@@ -2850,6 +2917,76 @@ ui.retryMicBtn.addEventListener('click', retryMicAccess);
 ui.copyLinkBtn.addEventListener('click', copyInviteLink);
 ui.sendBtn.addEventListener('click', sendChatMessage);
 ui.attachFileBtn.addEventListener('click', () => ui.fileInput.click());
+function sendFileToPeer(peerId, file, fileId, callbacks) {
+  const peer = getPeerState(peerId);
+  if (!peer || !peer.dataChannel || peer.dataChannel.readyState !== 'open') {
+    callbacks.onFinished();
+    return;
+  }
+
+  const channel = peer.dataChannel;
+  let offset = 0;
+  const reader = new FileReader();
+
+  reader.onload = (e) => {
+    if (channel.readyState !== 'open') {
+      callbacks.onFinished();
+      return;
+    }
+    const chunk = e.target.result;
+    const fileIdStr = fileId.padEnd(16, ' ');
+    const fileIdBytes = new TextEncoder().encode(fileIdStr);
+    const chunkWithHeader = new Uint8Array(16 + chunk.byteLength);
+    chunkWithHeader.set(fileIdBytes, 0);
+    chunkWithHeader.set(new Uint8Array(chunk), 16);
+
+    try {
+      channel.send(chunkWithHeader.buffer);
+    } catch (err) {
+      console.warn(`Failed to send chunk to peer ${peerId}:`, err);
+      callbacks.onFinished();
+      return;
+    }
+
+    offset += chunk.byteLength;
+    callbacks.onProgress(offset);
+
+    if (offset < file.size) {
+      readNextSlice();
+    } else {
+      callbacks.onFinished();
+    }
+  };
+
+  reader.onerror = () => {
+    console.error(`Could not read file for peer ${peerId}`);
+    callbacks.onFinished();
+  };
+
+  const readNextSlice = () => {
+    if (channel.readyState !== 'open') {
+      callbacks.onFinished();
+      return;
+    }
+
+    if (channel.bufferedAmount > DATA_CHANNEL_HIGH_WATER) {
+      const resumeTransfer = () => {
+        channel.onbufferedamountlow = null;
+        channel.removeEventListener('close', resumeTransfer);
+        readNextSlice();
+      };
+      channel.onbufferedamountlow = resumeTransfer;
+      channel.addEventListener('close', resumeTransfer, { once: true });
+      return;
+    }
+
+    const slice = file.slice(offset, offset + FILE_CHUNK_SIZE);
+    reader.readAsArrayBuffer(slice);
+  };
+
+  readNextSlice();
+}
+
 ui.fileInput.addEventListener('change', () => {
   const file = ui.fileInput.files[0];
   if (!file) return;
@@ -2864,93 +3001,57 @@ ui.fileInput.addEventListener('change', () => {
     return;
   }
 
-  const openChannels = peerEntries()
-    .map(([, peer]) => peer.dataChannel)
-    .filter((channel) => channel && channel.readyState === 'open');
+  const targetPeers = [];
+  peerEntries().forEach(([peerId, peer]) => {
+    if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
+      targetPeers.push(peerId);
+    }
+  });
 
-  if (!openChannels.length) {
+  if (!targetPeers.length) {
     showToast('No connected peers are ready for file transfer.', 'warning');
     return;
   }
 
   const fileId = 'file-' + Math.random().toString(36).substr(2, 9);
   const meta = { type: 'file-meta', fileId, name: file.name.slice(0, 120), size: file.size, fileType: file.type || 'application/octet-stream' };
-  openChannels.forEach((channel) => {
-    try {
-      channel.send(JSON.stringify(meta));
-    } catch (error) {
-      console.error('Failed to send file metadata:', error);
+  
+  targetPeers.forEach(peerId => {
+    const peer = getPeerState(peerId);
+    if (peer && peer.dataChannel) {
+      try {
+        peer.dataChannel.send(JSON.stringify(meta));
+      } catch (error) {
+        console.error(`Failed to send file metadata to peer ${peerId}:`, error);
+      }
     }
   });
 
   appendFileProgress(fileId, file.name, file.size, true, state.username || 'You');
-  let offset = 0;
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const chunk = e.target.result;
-    const fileIdStr = fileId.padEnd(16, ' ');
-    const fileIdBytes = new TextEncoder().encode(fileIdStr);
-    const chunkWithHeader = new Uint8Array(16 + chunk.byteLength);
-    chunkWithHeader.set(fileIdBytes, 0);
-    chunkWithHeader.set(new Uint8Array(chunk), 16);
+  const pendingPeers = new Set(targetPeers);
+  let maxOffset = 0;
 
-    openChannels.forEach(channel => {
-      if (channel.readyState === 'open') {
-        channel.send(chunkWithHeader.buffer);
+  targetPeers.forEach(peerId => {
+    sendFileToPeer(peerId, file, fileId, {
+      onProgress: (offset) => {
+        if (offset > maxOffset) {
+          maxOffset = offset;
+          updateFileProgress(fileId, maxOffset, file.size);
+        }
+      },
+      onFinished: () => {
+        pendingPeers.delete(peerId);
+        if (pendingPeers.size === 0) {
+          removeFileProgress(fileId);
+          const url = URL.createObjectURL(file);
+          activeBlobUrls.push(url);
+          appendFileMessage(file.name, url, file.size, true, state.username || 'You');
+          showToast('File sent to all peers.', 'success');
+        }
       }
     });
-    offset += chunk.byteLength;
-    updateFileProgress(fileId, offset, file.size);
-
-    if (offset < file.size) {
-      readSlice(offset);
-    } else {
-      removeFileProgress(fileId);
-      const url = URL.createObjectURL(file);
-      activeBlobUrls.push(url);
-      appendFileMessage(file.name, url, file.size, true, state.username || 'You');
-      showToast('File sent.', 'success');
-    }
-  };
-
-  reader.onerror = () => {
-    showToast('Could not read the selected file.', 'error');
-  };
-
-  const readSlice = (o) => {
-    const activeChannels = openChannels.filter(c => c.readyState === 'open');
-    if (activeChannels.length === 0) {
-      showToast('File transfer stopped because all peers disconnected.', 'warning');
-      return;
-    }
-
-    const congestedChannels = activeChannels.filter(c => c.bufferedAmount > DATA_CHANNEL_HIGH_WATER);
-    if (congestedChannels.length > 0) {
-      let resolvedCount = 0;
-      const onChannelReady = () => {
-        resolvedCount++;
-        if (resolvedCount === congestedChannels.length) {
-          readSlice(o);
-        }
-      };
-      congestedChannels.forEach(c => {
-        const resumeTransfer = () => {
-          c.onbufferedamountlow = null;
-          c.removeEventListener('close', resumeTransfer);
-          onChannelReady();
-        };
-        c.onbufferedamountlow = resumeTransfer;
-        c.addEventListener('close', resumeTransfer, { once: true });
-      });
-      return;
-    }
-
-    const slice = file.slice(o, o + FILE_CHUNK_SIZE);
-    reader.readAsArrayBuffer(slice);
-  };
-
-  readSlice(0);
+  });
 });
 ui.recordBtn.addEventListener('click', toggleRecording);
 ui.chatInput.addEventListener('keydown', (event) => {

@@ -28,9 +28,12 @@
         <p>Professional low-latency video meetings.</p>
 
         <div class="input-group">
-          <input type="text" id="usernameInput" placeholder="Display Name" maxlength="32" />
-          <input type="text" id="roomInput" placeholder="Room ID" maxlength="64" />
-          <input type="password" id="passwordInput" placeholder="Room Password (optional)" maxlength="128" />
+          <label class="sr-only" for="usernameInput">Display Name</label>
+          <input type="text" id="usernameInput" placeholder="Display Name" maxlength="32" aria-label="Display Name" />
+          <label class="sr-only" for="roomInput">Room ID</label>
+          <input type="text" id="roomInput" placeholder="Room ID" maxlength="64" aria-label="Room ID" />
+          <label class="sr-only" for="passwordInput">Room Password (optional)</label>
+          <input type="password" id="passwordInput" placeholder="Room Password (optional)" maxlength="128" aria-label="Room Password (optional)" />
           <label class="sr-only" for="deviceSelect">Microphone device</label>
           <select id="deviceSelect">
             <option value="">Detecting hardware...</option>
@@ -92,15 +95,15 @@
                   <button class="wb-color-btn" data-color="eraser" style="background: transparent; border: 2px dashed #888; display: grid; place-items: center;" title="Eraser"><i class="fa-solid fa-eraser" style="font-size: 0.65rem; color: #888;"></i></button>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; margin-left: 12px;">
-                  <span style="font-size: 0.8rem; color: var(--muted);">Size:</span>
-                  <input type="range" id="wbBrushSize" min="1" max="20" value="3" style="width: 80px; padding: 0; cursor: pointer; background: #333;" />
+                  <label for="wbBrushSize" style="font-size: 0.8rem; color: var(--muted); cursor: pointer;">Size:</label>
+                  <input type="range" id="wbBrushSize" min="1" max="20" value="3" style="width: 80px; padding: 0; cursor: pointer; background: #333;" aria-label="Brush Size" />
                   <span id="wbBrushSizeVal" style="font-size: 0.8rem; min-width: 16px;">3px</span>
                 </div>
                 <button id="wbClearBtn" class="btn-secondary" style="padding: 4px 12px; font-size: 0.8rem; margin-left: auto;"><i class="fa-solid fa-trash-can"></i> Clear</button>
               </div>
               <div id="canvasWrapper" style="flex: 1; min-height: 0; position: relative; background: #181818;">
-                <canvas id="wbCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
-                <div id="wbCursorContainer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; z-index: 10;"></div>
+                <canvas id="wbCanvas" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: block; cursor: crosshair;"></canvas>
+                <div id="wbCursorContainer" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; overflow: hidden; z-index: 10;"></div>
               </div>
             </div>
 
@@ -151,11 +154,11 @@
 
               <!-- Split Workspace Container -->
               <div id="wbSplitWorkspaceContainer" style="display: flex; flex: 1; min-height: 0; width: 100%; position: relative;">
-                <textarea id="wbTextarea" style="flex: 1; width: 100%; height: 100%; border: none; background: transparent; color: #c9d1d9; font-family: 'Fira Code', Consolas, Monaco, monospace; font-size: 0.95rem; padding: 24px; resize: none; outline: none; line-height: 1.6;" placeholder="Start writing shared notes or code here... (synchronized in real-time)"></textarea>
+                <textarea id="wbTextarea" style="flex: 1; width: 100%; height: 100%; border: none; background: transparent; color: #c9d1d9; font-family: 'Fira Code', Consolas, Monaco, monospace; font-size: 0.95rem; padding: 24px; resize: none; outline: none; line-height: 1.6;" placeholder="Start writing shared notes or code here... (synchronized in real-time)" aria-label="Shared Notes Editor"></textarea>
                 
                 <!-- Code Editor Wrapper -->
                 <div id="wbCodeEditorWrapper" style="display: none; min-height: 0; flex-direction: column; position: relative;">
-                  <textarea id="wbCodeTextarea"></textarea>
+                  <textarea id="wbCodeTextarea" aria-label="Shared Programming Code Editor"></textarea>
                 </div>
                 
                 <!-- Draggable Split Resizer Divider -->
@@ -165,7 +168,7 @@
                   <!-- Stdin input section -->
                   <div id="wbStdinContainer" class="stdin-container" style="display: flex; flex-direction: column; border-bottom: 1px solid var(--stroke); flex-shrink: 0; background: #0c0c0c; height: 95px;">
                     <div style="font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,0.05); flex-shrink: 0;">Program Input (stdin)</div>
-                    <textarea id="wbStdin" style="width: 100%; flex: 1; border: none; background: transparent; color: #c9d1d9; font-family: 'Fira Code', Consolas, Monaco, monospace; font-size: 0.85rem; padding: 8px 16px; resize: none; outline: none; line-height: 1.4;" placeholder="Type standard input (stdin) for your program here..."></textarea>
+                    <textarea id="wbStdin" style="width: 100%; flex: 1; border: none; background: transparent; color: #c9d1d9; font-family: 'Fira Code', Consolas, Monaco, monospace; font-size: 0.85rem; padding: 8px 16px; resize: none; outline: none; line-height: 1.4;" placeholder="Type standard input (stdin) for your program here..." aria-label="Standard input (stdin) for compiler"></textarea>
                   </div>
                   
                   <!-- Draggable Terminal Resizer Divider (between stdin and terminal output) -->
@@ -294,9 +297,11 @@
           </div>
           <div class="typing-indicator" id="typingIndicator">Someone is typing...</div>
           <div class="chat-input-row">
-            <input type="file" id="fileInput" class="sr-only" />
+            <label class="sr-only" for="fileInput">Choose file to attach</label>
+            <input type="file" id="fileInput" class="sr-only" aria-label="Choose file to attach" />
             <button id="attachFileBtn" class="btn-icon" title="Send File"><i class="fa-solid fa-paperclip"></i></button>
-            <input type="text" id="chatInput" placeholder="Message..." disabled maxlength="4000" style="flex:1" />
+            <label class="sr-only" for="chatInput">Type a message</label>
+            <input type="text" id="chatInput" placeholder="Message..." disabled maxlength="4000" style="flex:1" aria-label="Type a message" />
             <button id="sendBtn" class="btn-icon" disabled><i class="fa-solid fa-paper-plane"></i></button>
           </div>
         </div>

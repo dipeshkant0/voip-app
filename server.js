@@ -577,7 +577,7 @@ io.on('connection', (socket) => {
   socket.on('webrtc-offer', (data = {}) => {
     if (!checkRateLimit()) return;
     if (!currentRoom || typeof data.target !== 'string' || !data.sdp) return;
-    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 15000) return;
+    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
     forwardIfValid(currentRoom, data.target, 'webrtc-offer', {
       sender: socket.id,
       room: currentRoom,
@@ -588,7 +588,7 @@ io.on('connection', (socket) => {
   socket.on('webrtc-answer', (data = {}) => {
     if (!checkRateLimit()) return;
     if (!currentRoom || typeof data.target !== 'string' || !data.sdp) return;
-    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 15000) return;
+    if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
     forwardIfValid(currentRoom, data.target, 'webrtc-answer', {
       sender: socket.id,
       room: currentRoom,

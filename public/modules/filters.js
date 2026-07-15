@@ -79,13 +79,13 @@ export function init(onTrackChanged) {
 
 export async function processTrack(track) {
   if (!track) {
-    stopProcessing();
+    stopProcessing(true);
     rawTrack = null;
     return null;
   }
   
   if (currentFilter === 'none') {
-    stopProcessing();
+    stopProcessing(true);
     rawTrack = track;
     return track;
   }
@@ -96,7 +96,7 @@ export async function processTrack(track) {
   
   // Stop previous processing if track changes
   if (rawTrack !== track) {
-    stopProcessing();
+    stopProcessing(false);
     rawTrack = track;
   }
   
@@ -262,17 +262,19 @@ function stopLoop() {
   }
 }
 
-function stopProcessing() {
+function stopProcessing(forceStreamDestroy = false) {
   stopLoop();
   if (videoEl) {
     videoEl.pause();
     videoEl.srcObject = null;
   }
-  if (filteredTrack) {
-    filteredTrack.stop();
-    filteredTrack = null;
+  if (forceStreamDestroy) {
+    if (filteredTrack) {
+      filteredTrack.stop();
+      filteredTrack = null;
+    }
+    filteredStream = null;
   }
-  filteredStream = null;
   faceX = null;
   faceY = null;
   targetFaceX = null;
