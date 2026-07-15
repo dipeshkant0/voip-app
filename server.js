@@ -18,7 +18,16 @@ const DEFAULT_ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:global.stun.twilio.com:3478' }
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp'
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  }
 ];
 const RATE_LIMIT_WINDOW_MS = 1000;
 const RATE_LIMIT_MAX_EVENTS = 100;
@@ -73,7 +82,8 @@ async function fetchMeteredIceServers(project, apiKey) {
     return normalizeIceServers(data);
   } catch (error) {
     clearTimeout(timeoutId);
-    console.error('Failed to fetch Metered TURN API:', error);
+    const msg = error.name === 'AbortError' ? 'Request timed out (exceeded 5 seconds)' : error.message;
+    console.warn(`Failed to fetch Metered TURN API: ${msg}`);
     return null;
   }
 }
@@ -94,7 +104,8 @@ async function fetchTwilioIceServers(accountSid, authToken) {
     return normalizeIceServers(data.ice_servers);
   } catch (error) {
     clearTimeout(timeoutId);
-    console.error('Failed to fetch Twilio NTS API:', error);
+    const msg = error.name === 'AbortError' ? 'Request timed out (exceeded 5 seconds)' : error.message;
+    console.warn(`Failed to fetch Twilio NTS API: ${msg}`);
     return null;
   }
 }
@@ -384,7 +395,7 @@ function getRoomPeerIds(roomName, excludeSocketId) {
 const roomMetadata = new Map();
 
 function getRoomSnapshot(roomName) {
-  const peers = getRoomPeerIds(roomName).sort((left, right) => left.localeCompare(right));
+  const peers = getRoomPeerIds(roomName);
   const meta = roomMetadata.get(roomName);
   const usernames = {};
   if (meta) {
@@ -411,58 +422,64 @@ function forwardIfValid(roomName, targetId, eventName, payload) {
   return true;
 }
 
-io.on('connection', (socket) => {
-  let currentRoom = null;
-  let eventTokens = RATE_LIMIT_MAX_EVENTS;
-  let lastRefill = Date.now();
+function checkRateLimit(socket) {
+  const now = Date.now();
   const tokensPerMs = RATE_LIMIT_MAX_EVENTS / RATE_LIMIT_WINDOW_MS;
-
-  function checkRateLimit() {
-    const now = Date.now();
-    const elapsed = now - lastRefill;
-
-    if (elapsed > 0) {
-      eventTokens = Math.min(RATE_LIMIT_MAX_EVENTS, eventTokens + elapsed * tokensPerMs);
-      lastRefill = now;
-    }
-
-    if (eventTokens >= 1) {
-      eventTokens -= 1;
-      return true;
-    }
-    return false;
+  
+  if (socket.lastRefill === undefined) {
+    socket.lastRefill = now;
+  }
+  if (socket.eventTokens === undefined) {
+    socket.eventTokens = RATE_LIMIT_MAX_EVENTS;
+  }
+  
+  const elapsed = now - socket.lastRefill;
+  if (elapsed > 0) {
+    socket.eventTokens = Math.min(RATE_LIMIT_MAX_EVENTS, socket.eventTokens + elapsed * tokensPerMs);
+    socket.lastRefill = now;
   }
 
-  const leaveCurrentRoom = (broadcast = true) => {
-    if (!currentRoom) return false;
-
-    const room = currentRoom;
-    currentRoom = null;
-    socket.leave(room);
-
-    const meta = roomMetadata.get(room);
-    if (meta) {
-      meta.users.delete(socket.id);
-      if (meta.users.size === 0) {
-        roomMetadata.delete(room);
-      }
-    }
-
-    if (broadcast) {
-      socket.to(room).emit('peer-disconnected', {
-        peerId: socket.id,
-        room,
-      });
-    }
-
-    emitRoomState(room);
-
+  if (socket.eventTokens >= 1) {
+    socket.eventTokens -= 1;
     return true;
-  };
+  }
+  return false;
+}
+
+function leaveCurrentRoom(socket, broadcast = true) {
+  const room = socket.currentRoom;
+  if (!room) return false;
+
+  socket.currentRoom = null;
+  socket.leave(room);
+
+  const meta = roomMetadata.get(room);
+  if (meta) {
+    meta.users.delete(socket.id);
+    if (meta.users.size === 0) {
+      roomMetadata.delete(room);
+    }
+  }
+
+  if (broadcast) {
+    socket.to(room).emit('peer-disconnected', {
+      peerId: socket.id,
+      room,
+    });
+  }
+
+  emitRoomState(room);
+  return true;
+}
+
+io.on('connection', (socket) => {
+  socket.currentRoom = null;
+  socket.eventTokens = RATE_LIMIT_MAX_EVENTS;
+  socket.lastRefill = Date.now();
 
   socket.on('join-room', async (payload, ack) => {
     try {
-      if (!checkRateLimit()) {
+      if (!checkRateLimit(socket)) {
         if (typeof ack === 'function') {
           ack({
             ok: false,
@@ -473,7 +490,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const safePayload = payload && typeof payload === 'object' ? payload : {};
+      const safePayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
       const roomName = typeof payload === 'string' ? payload : safePayload.roomId;
       const rawUsername = typeof safePayload.username === 'string' ? safePayload.username.trim() : '';
       const username = (rawUsername || 'Anonymous').slice(0, MAX_USERNAME_LENGTH);
@@ -502,8 +519,8 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (currentRoom && currentRoom !== room) {
-        leaveCurrentRoom(true);
+      if (socket.currentRoom && socket.currentRoom !== room) {
+        leaveCurrentRoom(socket, true);
       }
 
       const existingMeta = roomMetadata.get(room);
@@ -541,7 +558,7 @@ io.on('connection', (socket) => {
       }
 
       const existingPeerIds = getRoomPeerIds(room, socket.id);
-      currentRoom = room;
+      socket.currentRoom = room;
       await socket.join(room);
 
       socket.to(room).emit('peer-joined', {
@@ -574,46 +591,50 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('webrtc-offer', (data = {}) => {
-    if (!checkRateLimit()) return;
-    if (!currentRoom || typeof data.target !== 'string' || !data.sdp) return;
+  socket.on('webrtc-offer', (data) => {
+    if (!data || typeof data !== 'object') return;
+    if (!checkRateLimit(socket)) return;
+    if (!socket.currentRoom || typeof data.target !== 'string' || !data.sdp) return;
     if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
-    forwardIfValid(currentRoom, data.target, 'webrtc-offer', {
+    forwardIfValid(socket.currentRoom, data.target, 'webrtc-offer', {
       sender: socket.id,
-      room: currentRoom,
+      room: socket.currentRoom,
       sdp: data.sdp,
     });
   });
 
-  socket.on('webrtc-answer', (data = {}) => {
-    if (!checkRateLimit()) return;
-    if (!currentRoom || typeof data.target !== 'string' || !data.sdp) return;
+  socket.on('webrtc-answer', (data) => {
+    if (!data || typeof data !== 'object') return;
+    if (!checkRateLimit(socket)) return;
+    if (!socket.currentRoom || typeof data.target !== 'string' || !data.sdp) return;
     if (typeof data.sdp.type !== 'string' || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
-    forwardIfValid(currentRoom, data.target, 'webrtc-answer', {
+    forwardIfValid(socket.currentRoom, data.target, 'webrtc-answer', {
       sender: socket.id,
-      room: currentRoom,
+      room: socket.currentRoom,
       sdp: data.sdp,
     });
   });
 
-  socket.on('ice-candidate', (data = {}) => {
-    if (!checkRateLimit()) return;
-    if (!currentRoom || typeof data.target !== 'string' || !data.candidate) return;
-    forwardIfValid(currentRoom, data.target, 'ice-candidate', {
+  socket.on('ice-candidate', (data) => {
+    if (!data || typeof data !== 'object') return;
+    if (!checkRateLimit(socket)) return;
+    if (!socket.currentRoom || typeof data.target !== 'string' || !data.candidate) return;
+    forwardIfValid(socket.currentRoom, data.target, 'ice-candidate', {
       sender: socket.id,
-      room: currentRoom,
+      room: socket.currentRoom,
       candidate: data.candidate,
     });
   });
 
-  socket.on('room-chat-message', (data = {}) => {
-    if (!checkRateLimit()) return;
-    if (!currentRoom) return;
+  socket.on('room-chat-message', (data) => {
+    if (!data || typeof data !== 'object') return;
+    if (!checkRateLimit(socket)) return;
+    if (!socket.currentRoom) return;
 
     if (data.encrypted) {
       if (typeof data.payload !== 'string' || data.payload.length > 50000) return;
       if (typeof data.iv !== 'string' || data.iv.length > 100) return;
-      socket.to(currentRoom).emit('room-chat-message', {
+      socket.to(socket.currentRoom).emit('room-chat-message', {
         senderId: socket.id,
         encrypted: true,
         payload: data.payload,
@@ -621,7 +642,7 @@ io.on('connection', (socket) => {
       });
     } else {
       if (typeof data.text !== 'string' || data.text.length > 4000) return;
-      socket.to(currentRoom).emit('room-chat-message', {
+      socket.to(socket.currentRoom).emit('room-chat-message', {
         senderId: socket.id,
         text: data.text,
         username: data.username || 'Anonymous',
@@ -629,31 +650,33 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('media-state-change', (data = {}) => {
-    if (!checkRateLimit()) return;
-    if (!currentRoom || typeof data.type !== 'string' || typeof data.enabled !== 'boolean') return;
-    socket.to(currentRoom).emit('media-state-change', {
+  socket.on('media-state-change', (data) => {
+    if (!data || typeof data !== 'object') return;
+    if (!checkRateLimit(socket)) return;
+    if (!socket.currentRoom || typeof data.type !== 'string' || typeof data.enabled !== 'boolean') return;
+    socket.to(socket.currentRoom).emit('media-state-change', {
       senderId: socket.id,
       type: data.type,
       enabled: data.enabled,
     });
   });
 
-  socket.on('typing', (data = {}) => {
-    if (!checkRateLimit()) return;
-    if (!currentRoom) return;
-    socket.to(currentRoom).emit('typing', {
+  socket.on('typing', (data) => {
+    if (!data || typeof data !== 'object') return;
+    if (!checkRateLimit(socket)) return;
+    if (!socket.currentRoom) return;
+    socket.to(socket.currentRoom).emit('typing', {
       senderId: socket.id,
       username: data.username || 'Anonymous',
     });
   });
 
   socket.on('leave-room', () => {
-    leaveCurrentRoom(true);
+    leaveCurrentRoom(socket, true);
   });
 
   socket.on('disconnecting', () => {
-    leaveCurrentRoom(true);
+    leaveCurrentRoom(socket, true);
   });
 });
 

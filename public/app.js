@@ -1576,11 +1576,12 @@ function applyLocalTracksToPeer(peerId) {
   if (!peer) return;
 
   const pc = peer.pc;
+  if (pc.signalingState === 'closed') return;
   const transceivers = pc.getTransceivers();
 
-  // Permanently identify the correct channels
-  const audioTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'audio');
-  const videoTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'video');
+  // Identify the correct channels by checking sender and receiver track kinds
+  const audioTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
+  const videoTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'video' || t.sender?.track?.kind === 'video');
 
   // 1. Handle Audio Track
   const audioTrack = currentTrack();
@@ -1593,7 +1594,13 @@ function applyLocalTracksToPeer(peerId) {
         audioTransceiver.direction = 'sendrecv';
       }
     } else {
-      pc.addTrack(audioTrack, state.localStream);
+      try {
+        pc.addTrack(audioTrack, state.localStream || new MediaStream());
+      } catch (e) {
+        console.warn('Failed to add audio track, trying replaceTrack fallback:', e);
+        const sender = pc.getSenders().find(s => s.track?.kind === 'audio');
+        if (sender) sender.replaceTrack(audioTrack).catch(() => {});
+      }
     }
   } else if (audioTransceiver) {
     audioTransceiver.sender.replaceTrack(null).catch(() => { });
@@ -1613,7 +1620,13 @@ function applyLocalTracksToPeer(peerId) {
         videoTransceiver.direction = 'sendrecv';
       }
     } else {
-      pc.addTrack(videoTrack, state.localStream || new MediaStream());
+      try {
+        pc.addTrack(videoTrack, state.localStream || new MediaStream());
+      } catch (e) {
+        console.warn('Failed to add video track, trying replaceTrack fallback:', e);
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(videoTrack).catch(() => {});
+      }
     }
 
     const currentTransceiver = videoTransceiver || pc.getTransceivers().find(t => t.sender.track === videoTrack);
@@ -2245,20 +2258,23 @@ function handleRemoteAnswer(data) {
 function handleRemoteIce(data) {
   if (!data?.sender || !data?.candidate || typeof data.candidate !== 'object') return;
 
+  const peer = ensurePeer(data.sender);
+  if (!peer) return;
+
   queueSignalingTask(data.sender, async () => {
-    const peer = state.peers.get(data.sender);
-    if (!peer) return;
+    const currentPeer = state.peers.get(data.sender);
+    if (!currentPeer) return;
 
     try {
       if (!data.candidate.candidate) return; // Ignore empty candidates
       const candidate = new RTCIceCandidate(data.candidate);
-      if (!peer.pc.remoteDescription) {
-        peer.iceQueue.push(candidate);
+      if (!currentPeer.pc.remoteDescription) {
+        currentPeer.iceQueue.push(candidate);
       } else {
-        await peer.pc.addIceCandidate(candidate).catch(e => console.warn('Ignored invalid candidate:', e));
+        await currentPeer.pc.addIceCandidate(candidate).catch(e => console.warn('Ignored invalid candidate:', e));
       }
     } catch (error) {
-      if (!peer.ignoreOffer) {
+      if (!currentPeer.ignoreOffer) {
         console.warn('ICE parsing failed:', error);
       }
     }
