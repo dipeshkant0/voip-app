@@ -1416,7 +1416,9 @@ function resizeCanvas() {
   canvas.width = width;
   canvas.height = height;
   
-  // Restore canvas image stretched to new size
+  // Restore canvas image stretched to new size with high-quality smoothing
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height, 0, 0, canvas.width, canvas.height);
   
   canvasBoundingRect = canvas.getBoundingClientRect();
