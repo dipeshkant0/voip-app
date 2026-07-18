@@ -214,6 +214,7 @@ const compileLimiter = rateLimit({
   max: 20,             // limit each IP to 20 compilations per minute
   message: { error: 'Too many compilation requests. Please try again in a minute.' },
   validate: false,
+  trustProxy: false,
   keyGenerator: (req) => {
     const forwarded = req.headers['x-forwarded-for'];
     return forwarded ? forwarded.split(',')[0].trim() : req.socket.remoteAddress;
@@ -342,10 +343,19 @@ const limiter = rateLimit({
   max: 100,
   message: 'Too many connections',
   validate: false,
+  trustProxy: false,
   keyGenerator: (req) => req.ip || req.socket.remoteAddress,
 });
 
 io.engine.use((req, res, next) => {
+  if (!req.app) {
+    req.app = {
+      get: (key) => {
+        if (key === 'trust proxy') return false;
+        return undefined;
+      }
+    };
+  }
   const forwarded = req.headers['x-forwarded-for'];
   req.ip = forwarded ? forwarded.split(',')[0].trim() : req.socket.remoteAddress;
   if (typeof res.status !== 'function') {
@@ -355,11 +365,9 @@ io.engine.use((req, res, next) => {
     };
   }
   if (typeof res.send !== 'function') {
-    res.send = function (body) {
-      if (!res.headersSent) {
-        res.setHeader('Content-Type', 'text/plain');
-      }
-      res.end(String(body));
+    res.send = function (data) {
+      res.end(typeof data === 'object' ? JSON.stringify(data) : data);
+      return res;
     };
   }
   if (typeof res.json !== 'function') {
