@@ -1,69 +1,150 @@
 const LANGUAGE_DICTIONARIES = {
   'text/x-csrc': [
-    'int', 'char', 'void', 'float', 'double', 'struct', 'typedef', '#include', '#define',
-    'printf', 'malloc', 'free', 'sizeof', 'fopen', 'fread', 'pthread_create', 'pthread_join',
-    'fork', 'execvp', 'waitpid', 'omp_get_thread_num'
+    'auto', 'break', 'case', 'char', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum',
+    'extern', 'float', 'for', 'goto', 'if', 'int', 'long', 'register', 'return', 'short', 'signed',
+    'sizeof', 'static', 'struct', 'switch', 'typedef', 'union', 'unsigned', 'void', 'volatile', 'while',
+    '#include', '#define', '#ifdef', '#ifndef', '#endif', '#if', '#elif', '#else', '#pragma',
+    'printf', 'scanf', 'malloc', 'calloc', 'realloc', 'free', 'exit', 'memcpy', 'memset', 'strlen',
+    'strcpy', 'strncpy', 'strcmp', 'strncmp', 'fopen', 'fclose', 'fread', 'fwrite', 'fprintf', 'fscanf',
+    'fgets', 'fputs', 'fseek', 'ftell', 'rewind', 'NULL', 'EOF', 'FILE', 'size_t'
   ],
   'text/x-c++src': [
-    'class', 'public', 'private', 'protected', 'virtual', 'override', 'template', 'typename',
-    'std', 'cout', 'cin', 'endl', 'vector', 'string', 'map', 'unordered_map', 'auto',
-    'const', 'constexpr', 'nullptr', '#include', 'MPI_Init', 'MPI_Comm_rank'
+    'alignas', 'alignof', 'and', 'and_eq', 'asm', 'atomic', 'auto', 'bitand', 'bitor', 'bool', 'break',
+    'case', 'catch', 'char', 'char8_t', 'char16_t', 'char32_t', 'class', 'compl', 'concept', 'const',
+    'consteval', 'constexpr', 'constinit', 'const_cast', 'continue', 'co_await', 'co_return', 'co_yield',
+    'decltype', 'default', 'delete', 'do', 'double', 'dynamic_cast', 'else', 'enum', 'explicit',
+    'export', 'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long',
+    'mutable', 'namespace', 'new', 'noexcept', 'not', 'not_eq', 'nullptr', 'operator', 'or', 'or_eq',
+    'private', 'protected', 'public', 'register', 'reinterpret_cast', 'requires', 'return', 'short',
+    'signed', 'sizeof', 'static', 'static_assert', 'static_cast', 'struct', 'switch', 'template',
+    'this', 'thread_local', 'throw', 'true', 'try', 'typedef', 'typeid', 'typename', 'union', 'unsigned',
+    'using', 'virtual', 'void', 'volatile', 'wchar_t', 'while', 'xor', 'xor_eq',
+    '#include', '#define', '#ifdef', '#ifndef', '#endif', '#if', '#elif', '#else',
+    'std', 'cout', 'cin', 'endl', 'vector', 'string', 'map', 'set', 'unordered_map', 'unordered_set',
+    'shared_ptr', 'unique_ptr', 'make_shared', 'make_unique', 'push_back', 'pop_back', 'size', 'empty',
+    'begin', 'end', 'insert', 'erase', 'find', 'count', 'iostream', 'algorithm', 'numeric', 'functional'
   ],
   'python': [
-    'def', 'class', 'import', 'from', 'return', 'yield', 'pass', 'break', 'continue',
-    'if', 'elif', 'else', 'for', 'while', 'in', 'and', 'or', 'not', 'is', 'None', 'True', 'False',
-    'print', 'len', 'range', 'enumerate', 'zip', 'self', 'dict', 'list', 'set'
+    'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
+    'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in',
+    'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield',
+    'abs', 'all', 'any', 'bin', 'bool', 'breakpoint', 'bytearray', 'bytes', 'callable', 'chr',
+    'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir', 'divmod', 'enumerate', 'eval',
+    'exec', 'filter', 'float', 'format', 'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'help',
+    'hex', 'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list', 'locals', 'map',
+    'max', 'min', 'next', 'object', 'oct', 'open', 'ord', 'pow', 'print', 'property', 'range', 'repr',
+    'reversed', 'round', 'set', 'setattr', 'slice', 'sorted', 'staticmethod', 'str', 'sum', 'super',
+    'tuple', 'type', 'vars', 'zip', 'self', 'append', 'extend', 'insert', 'remove', 'pop', 'clear',
+    'index', 'count', 'sort', 'reverse', 'keys', 'values', 'items', 'get', 'update', 'split', 'join'
   ],
   'text/x-java': [
-    'public', 'private', 'protected', 'class', 'interface', 'implements', 'extends',
-    'static', 'final', 'void', 'int', 'boolean', 'double', 'String', 'new', 'return',
-    'System.out.println', 'import', 'package', 'Override', 'Exception', 'try', 'catch'
+    'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class', 'const',
+    'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final', 'finally', 'float',
+    'for', 'goto', 'if', 'implements', 'import', 'instanceof', 'int', 'interface', 'long', 'native',
+    'new', 'package', 'private', 'protected', 'public', 'return', 'short', 'static', 'strictfp',
+    'super', 'switch', 'synchronized', 'this', 'throw', 'throws', 'transient', 'try', 'void', 'volatile',
+    'while', 'true', 'false', 'null', 'System', 'System.out.println', 'System.err.println', 'String',
+    'Integer', 'Double', 'Float', 'Long', 'Boolean', 'Character', 'Byte', 'Short', 'Math', 'List',
+    'ArrayList', 'Map', 'HashMap', 'Set', 'HashSet', 'LinkedList', 'Queue', 'Stack', 'Collection',
+    'Collections', 'Arrays', 'add', 'remove', 'get', 'set', 'size', 'isEmpty', 'contains', 'put',
+    'containsKey', 'containsValue', 'keySet', 'values', 'entrySet', 'toString', 'equals', 'hashCode'
   ],
   'text/x-rustsrc': [
-    'fn', 'let', 'mut', 'struct', 'enum', 'impl', 'trait', 'use', 'mod', 'pub', 'return',
-    'match', 'if', 'else', 'loop', 'while', 'for', 'in', 'println!', 'String', 'Vec', 'Option',
-    'Result', 'Some', 'None', 'Ok', 'Err', 'as', 'const', 'static', 'unsafe'
+    'as', 'async', 'await', 'break', 'const', 'continue', 'crate', 'dyn', 'else', 'enum', 'extern',
+    'false', 'fn', 'for', 'if', 'impl', 'in', 'let', 'loop', 'match', 'mod', 'move', 'mut', 'pub',
+    'ref', 'return', 'self', 'Self', 'static', 'struct', 'super', 'trait', 'true', 'type', 'union',
+    'unsafe', 'use', 'where', 'while', 'println!', 'print!', 'format!', 'panic!', 'vec!', 'String',
+    'Vec', 'Option', 'Result', 'Some', 'None', 'Ok', 'Err', 'Box', 'Rc', 'Arc', 'Mutex', 'Cell',
+    'RefCell', 'HashMap', 'HashSet', 'BTreeMap', 'BTreeSet', 'iter', 'collect', 'unwrap', 'expect',
+    'as_ref', 'as_mut', 'clone', 'copy', 'default', 'std', 'core', 'alloc'
   ],
   'shell': [
-    'if', 'then', 'elif', 'else', 'fi', 'for', 'in', 'do', 'done', 'while', 'case', 'esac',
-    'echo', 'exit', 'return', 'local', 'export', 'alias', 'function', 'read', 'cat', 'grep',
-    'awk', 'sed', 'mkdir', 'rm', 'cp', 'mv', 'chmod', 'chown', 'ls', 'cd'
+    'if', 'then', 'elif', 'else', 'fi', 'for', 'in', 'do', 'done', 'while', 'until', 'case', 'esac',
+    'select', 'function', 'echo', 'printf', 'read', 'exit', 'return', 'local', 'export', 'alias',
+    'unalias', 'shift', 'declare', 'readonly', 'cat', 'grep', 'egrep', 'fgrep', 'awk', 'sed', 'mkdir',
+    'rm', 'cp', 'mv', 'chmod', 'chown', 'ls', 'cd', 'pwd', 'date', 'tar', 'gzip', 'gunzip', 'find',
+    'xargs', 'curl', 'wget', 'ssh', 'scp', 'rsync', 'ping', 'ifconfig', 'ip', 'systemctl', 'journalctl',
+    'ps', 'top', 'htop', 'kill', 'pkill', 'df', 'du', 'free', 'uptime', 'whoami', 'id', 'uname',
+    'awk', 'sed', 'grep', 'cut', 'head', 'tail', 'less', 'more', 'wc', 'sort', 'uniq', 'tee'
   ],
   'javascript': [
-    'const', 'let', 'var', 'function', 'class', 'constructor', 'extends', 'super', 'import',
-    'export', 'default', 'from', 'return', 'yield', 'async', 'await', 'try', 'catch', 'finally',
-    'throw', 'if', 'else', 'switch', 'case', 'break', 'continue', 'for', 'while', 'do', 'in',
-    'of', 'typeof', 'instanceof', 'new', 'this', 'console.log', 'document', 'window', 'Promise'
+    'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
+    'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof',
+    'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while',
+    'with', 'yield', 'let', 'static', 'yield', 'await', 'async', 'null', 'undefined', 'true', 'false',
+    'console', 'console.log', 'console.error', 'console.warn', 'console.dir', 'document', 'window',
+    'Promise', 'resolve', 'reject', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
+    'fetch', 'Response', 'Request', 'Headers', 'JSON', 'JSON.stringify', 'JSON.parse', 'Math',
+    'Math.random', 'Math.floor', 'Math.ceil', 'Math.round', 'Math.min', 'Math.max', 'Object',
+    'Object.keys', 'Object.values', 'Object.entries', 'Array', 'Array.isArray', 'map', 'filter',
+    'reduce', 'forEach', 'find', 'findIndex', 'push', 'pop', 'shift', 'unshift', 'slice', 'splice',
+    'join', 'split', 'length', 'toString', 'parseInt', 'parseFloat', 'isNaN', 'isFinite'
   ]
 };
 
-let canvas = null;
-let ctx = null;
-let isDrawing = false;
-let lastX = 0;
-let lastY = 0;
-let brushColor = '#ffffff';
-let brushSize = 3;
-let broadcastCallback = null;
-let lastLocalInputTime = 0;
-let lastCursorBroadcast = 0;
-let lastSentX = -1;
-let lastSentY = -1;
-let lastTextCursorBroadcast = 0;
-let lastSentCaretIndex = -1;
-const remoteTextCaretMap = new Map();
-const remotePointerMap = new Map();
-const peerCursorTimeouts = new Map();
-const peerTextCursorTimeouts = new Map();
-let cursorThrottleTimeout = null;
-let textCursorThrottleTimeout = null;
-let codeCursorThrottleTimeout = null;
-let resizeFrameId = null;
-let breakpointFrameId = null;
-let cmScrollFrameId = null;
-let textareaScrollFrameId = null;
-let isProgrammaticUpdate = false;
+const LOWERCASE_DICTIONARIES = {};
+for (const mode in LANGUAGE_DICTIONARIES) {
+  LOWERCASE_DICTIONARIES[mode] = LANGUAGE_DICTIONARIES[mode].map(word => ({
+    original: word,
+    lower: word.toLowerCase()
+  }));
+}
 
+const CODE_TEMPLATES = {
+  'javascript': `// JavaScript Starter Template
+console.log("Hello, World!");`,
+  'python': `# Python Starter Template
+def main():
+    print("Hello, World!")
+
+if __name__ == "__main__":
+    main()`,
+  'cpp': `// C++ Starter Template
+#include <iostream>
+
+int main() {
+    std::cout << "Hello, World!" << std::endl;
+    return 0;
+}`,
+  'c': `// C Starter Template
+#include <stdio.h>
+
+int main() {
+    printf("Hello, World!\\n");
+    return 0;
+}`,
+  'rust': `// Rust Starter Template
+fn main() {
+    println!("Hello, World!");
+}`,
+  'java': `// Java Starter Template
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}`,
+  'bash': `# Bash/Shell Starter Template
+echo "Hello, World!"`
+};
+
+const getDefaultCodePlaceholder = (lang) => {
+  return CODE_TEMPLATES[lang] || '// write your code here';
+};
+
+const isPlaceholderOrEmpty = (val) => {
+  const trimmed = val.trim();
+  if (!trimmed) return true;
+  for (const key in CODE_TEMPLATES) {
+    if (trimmed === CODE_TEMPLATES[key].trim()) return true;
+  }
+  return trimmed === '// code here' || trimmed === '# code here' || trimmed === '// write your code here';
+};
+
+let codeMirrorInstance = null;
+let lastCodeCursorBroadcast = 0;
+let lastSentCodeCaretIndex = -1;
+
+let canvas = null;
 let textarea = null;
 let cursorContainer = null;
 let textCursorContainer = null;
@@ -78,29 +159,50 @@ let languageSelect = null;
 let runBtn = null;
 let clearTerminalBtn = null;
 
-let lastTextBroadcastTime = 0;
-let pendingTextBroadcast = null;
-let lastSentText = '';
-let mimicDiv = null;
-let activeEditorMode = 'text';
-let breakpointResizeHandler = null;
-let cachedTextareaStyles = null;
+let ctx = null;
+let isDrawing = false;
+let lastX = 0;
+let lastY = 0;
+let brushColor = '#ffffff';
+let brushSize = 4;
+let broadcastCallback = null;
+
 let workspaceResizeHandler = null;
+let canvasResizeObserver = null;
+let breakpointResizeHandler = null;
+let resizeFrameId = null;
+let breakpointFrameId = null;
+let cmScrollFrameId = null;
+let textareaScrollFrameId = null;
+
+let lastTextBroadcastTime = 0;
+let lastSentText = '';
+let pendingTextBroadcast = null;
+let lastCursorBroadcast = 0;
+let lastSentX = -1;
+let lastSentY = -1;
+
+let cursorThrottleTimeout = null;
+let textCursorThrottleTimeout = null;
+let codeCursorThrottleTimeout = null;
+
+const peerCursorTimeouts = new Map();
+const peerTextCursorTimeouts = new Map();
+const remoteTextCaretMap = new Map();
+const remotePointerMap = new Map();
+
+let mimicDiv = null;
+let mimicTextBefore = null;
+let mimicSpan = null;
+let mimicTextAfter = null;
+let cachedTextareaStyles = null;
+
+let activeEditorMode = 'text';
 let cmRetries = 0;
+let isProgrammaticUpdate = false;
 
-const getDefaultCodePlaceholder = (lang) => {
-  const commentStyle = (lang === 'python' || lang === 'bash') ? '#' : '//';
-  return `${commentStyle} code here`;
-};
-
-const isPlaceholderOrEmpty = (val) => {
-  const trimmed = val.trim();
-  return !trimmed || trimmed === '// code here' || trimmed === '# code here';
-};
-
-let codeMirrorInstance = null;
-let lastCodeCursorBroadcast = 0;
-let lastSentCodeCaretIndex = -1;
+let canvasBoundingRect = null;
+let textCursorContainerBoundingRect = null;
 
 function broadcastCodeCursorThrottled() {
   if (isProgrammaticUpdate) return;
@@ -273,6 +375,40 @@ function cacheTextareaStyles() {
   });
 }
 
+let _overlayButtonsWired = false;
+function _wireOverlayButtons() {
+  if (_overlayButtonsWired) return;
+  _overlayButtonsWired = true;
+
+  const whiteboardBtn = document.getElementById('whiteboardBtn');
+  const whiteboardContainer = document.getElementById('whiteboardContainer');
+  const closeWbBtn = document.getElementById('closeWbBtn');
+
+  if (whiteboardBtn && whiteboardContainer) {
+    whiteboardBtn.addEventListener('click', () => {
+      const isHidden = whiteboardContainer.style.display === 'none' || whiteboardContainer.classList.contains('hidden');
+      if (isHidden) {
+        whiteboardContainer.style.display = 'flex';
+        whiteboardContainer.classList.remove('hidden');
+        whiteboardBtn.classList.add('active');
+        resizeCanvas();
+      } else {
+        whiteboardContainer.style.display = 'none';
+        whiteboardContainer.classList.add('hidden');
+        whiteboardBtn.classList.remove('active');
+      }
+    });
+  }
+
+  if (closeWbBtn && whiteboardContainer && whiteboardBtn) {
+    closeWbBtn.addEventListener('click', () => {
+      whiteboardContainer.style.display = 'none';
+      whiteboardContainer.classList.add('hidden');
+      whiteboardBtn.classList.remove('active');
+    });
+  }
+}
+
 export function init(broadcastFn) {
   broadcastCallback = broadcastFn;
   
@@ -290,7 +426,11 @@ export function init(broadcastFn) {
   languageSelect = document.getElementById('wbLanguageSelect');
   runBtn = document.getElementById('wbRunBtn');
   clearTerminalBtn = document.getElementById('wbClearTerminalBtn');
-  
+
+  // --- Wire overlay toggle buttons FIRST (before any early returns) ---
+  // This ensures the whiteboard panel open/close always works even if canvas fails
+  _wireOverlayButtons();
+
   if (!canvas) return;
   
   ctx = canvas.getContext('2d');
@@ -305,6 +445,22 @@ export function init(broadcastFn) {
     });
   };
   window.addEventListener('resize', workspaceResizeHandler);
+  
+  // Set up ResizeObserver to ensure canvas adapts to any container layout/display shifts at runtime
+  if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
+    canvasResizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        if (resizeFrameId) cancelAnimationFrame(resizeFrameId);
+        resizeFrameId = requestAnimationFrame(() => {
+          resizeCanvas();
+          cacheTextareaStyles();
+          resizeFrameId = null;
+        });
+      }
+    });
+    canvasResizeObserver.observe(canvas.parentElement);
+  }
+  
   resizeCanvas();
   cacheTextareaStyles();
   
@@ -321,9 +477,12 @@ export function init(broadcastFn) {
   
   // Cursor position broadcast listeners
   canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = rect.width ? (e.clientX - rect.left) / rect.width : 0;
-    const y = rect.height ? (e.clientY - rect.top) / rect.height : 0;
+    const rect = getCanvasRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const h = rect.height || 1;
+    const x = (e.clientX - rect.left - cx) / h;
+    const y = (e.clientY - rect.top - cy) / h;
     handleCursorMove(x, y, true);
   });
   
@@ -333,9 +492,12 @@ export function init(broadcastFn) {
   
   canvas.addEventListener('touchmove', (e) => {
     if (e.touches.length !== 1) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = rect.width ? (e.touches[0].clientX - rect.left) / rect.width : 0;
-    const y = rect.height ? (e.touches[0].clientY - rect.top) / rect.height : 0;
+    const rect = getCanvasRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const h = rect.height || 1;
+    const x = (e.touches[0].clientX - rect.left - cx) / h;
+    const y = (e.touches[0].clientY - rect.top - cy) / h;
     handleCursorMove(x, y, true);
   }, { passive: true });
   
@@ -446,30 +608,77 @@ export function init(broadcastFn) {
       if (CodeMirror.registerHelper && !CodeMirror.hint.advancedComposite) {
         CodeMirror.registerHelper("hint", "advancedComposite", function(cm) {
           const cursor = cm.getCursor();
+          
+          // Context awareness: Skip autocompleting inside comments or strings
           const token = cm.getTokenAt(cursor);
-          let currentWord = token.string.trim();
-
+          if (token && token.type && (token.type.includes('comment') || token.type.includes('string'))) {
+            return null;
+          }
+          
+          const line = cm.getLine(cursor.line);
+          
+          // Backtrack to find the start of the word/identifier token (including dots, colons, bangs, and hashtags)
+          let start = cursor.ch;
+          while (start > 0 && /[\w$#\.\!\-\:]/.test(line.charAt(start - 1))) {
+            start--;
+          }
+          const currentWord = line.slice(start, cursor.ch);
+ 
+          // Get local anyword hints for context from the document
           const localHints = (CodeMirror.hint && CodeMirror.hint.anyword)
             ? (CodeMirror.hint.anyword(cm) || { list: [], from: cursor, to: cursor })
             : { list: [], from: cursor, to: cursor };
           
-          if (!currentWord || !/^[a-zA-Z_0-9#\.\!]+$/.test(currentWord)) {
-            return localHints;
+          // Only trigger autocomplete if the word length >= 2, or if it ends with '.' or '::'
+          if (currentWord.length < 2 && !currentWord.endsWith('.') && !currentWord.endsWith('::')) {
+            return null;
           }
-
+ 
           const mode = cm.getOption("mode");
-          const globalKeywords = LANGUAGE_DICTIONARIES[mode] || [];
-
-          const matchedGlobals = globalKeywords.filter(word => 
-            word.toLowerCase().startsWith(currentWord.toLowerCase()) && word !== currentWord
-          );
-
-          const combinedList = [...new Set([...matchedGlobals, ...localHints.list])];
-
+          const currentLower = currentWord.toLowerCase();
+ 
+          // Case-insensitive matching using pre-lowered dictionary to save CPU and reduce GC
+          const matchedGlobals = LOWERCASE_DICTIONARIES[mode]
+            ? LOWERCASE_DICTIONARIES[mode]
+                .filter(item => item.lower.includes(currentLower) && item.lower !== currentLower)
+                .map(item => item.original)
+            : [];
+ 
+          // Also match local variables/words from the editor
+          const matchedLocals = localHints.list.filter(word => {
+            const wordLower = word.toLowerCase();
+            return wordLower.includes(currentLower) && wordLower !== currentLower;
+          });
+ 
+          const combinedList = [...new Set([...matchedGlobals, ...matchedLocals])];
+ 
+          // If no suggestions, return null to close the hint list cleanly
+          if (combinedList.length === 0) {
+            return null;
+          }
+ 
+          // Sort suggestions using pre-computed Schwartzian transform for maximum sorting CPU performance
+          const mappedList = combinedList.map(word => {
+            const wordLower = word.toLowerCase();
+            return {
+              original: word,
+              lower: wordLower,
+              startsWith: wordLower.startsWith(currentLower)
+            };
+          });
+ 
+          mappedList.sort((a, b) => {
+            if (a.startsWith && !b.startsWith) return -1;
+            if (!a.startsWith && b.startsWith) return 1;
+            return a.original.localeCompare(b.original);
+          });
+ 
+          const sortedList = mappedList.map(item => item.original);
+ 
           return {
-            list: combinedList.slice(0, 20),
-            from: CodeMirror.Pos(cursor.line, token.start),
-            to: CodeMirror.Pos(cursor.line, token.end)
+            list: sortedList.slice(0, 20),
+            from: CodeMirror.Pos(cursor.line, start),
+            to: CodeMirror.Pos(cursor.line, cursor.ch)
           };
         });
       }
@@ -490,7 +699,8 @@ export function init(broadcastFn) {
 
       // 1. Fixed Autocomplete: Use 'keyup' and validate character keys to prevent "undefined" selections
       codeMirrorInstance.on('keyup', (cm, event) => {
-        if (!/^[a-zA-Z0-9_\.]$/.test(event.key)) return;
+        // Trigger autocomplete on alphanumeric, dots, colons, bangs, hashtags, or Backspace
+        if (!/^[a-zA-Z0-9_\.\:\!\#]$/.test(event.key) && event.key !== 'Backspace') return;
 
         if (!cm.state.completionActive && cm.hasFocus()) {
           if (CodeMirror.hint.advancedComposite) {
@@ -649,7 +859,6 @@ export function init(broadcastFn) {
     const updateEditorFontSize = (size) => {
       if (codeMirrorInstance) {
         codeMirrorInstance.getWrapperElement().style.setProperty('font-size', size, 'important');
-        // Critical Fix: Force CodeMirror to recalculate gutter heights AFTER the DOM paints
         setTimeout(() => codeMirrorInstance.refresh(), 50);
       }
       if (textarea) {
@@ -1060,34 +1269,7 @@ export function init(broadcastFn) {
     });
   }
   
-  // Setup overlay toggle buttons
-  const whiteboardBtn = document.getElementById('whiteboardBtn');
-  const whiteboardContainer = document.getElementById('whiteboardContainer');
-  const closeWbBtn = document.getElementById('closeWbBtn');
-  
-  if (whiteboardBtn && whiteboardContainer) {
-    whiteboardBtn.addEventListener('click', () => {
-      const isHidden = whiteboardContainer.style.display === 'none' || whiteboardContainer.classList.contains('hidden');
-      if (isHidden) {
-        whiteboardContainer.style.display = 'flex';
-        whiteboardContainer.classList.remove('hidden');
-        whiteboardBtn.classList.add('active');
-        resizeCanvas();
-      } else {
-        whiteboardContainer.style.display = 'none';
-        whiteboardContainer.classList.add('hidden');
-        whiteboardBtn.classList.remove('active');
-      }
-    });
-  }
-  
-  if (closeWbBtn && whiteboardContainer && whiteboardBtn) {
-    closeWbBtn.addEventListener('click', () => {
-      whiteboardContainer.style.display = 'none';
-      whiteboardContainer.classList.add('hidden');
-      whiteboardBtn.classList.remove('active');
-    });
-  }
+  // (Overlay toggle buttons are wired in _wireOverlayButtons() at init start)
 
   // Setup mobile responsive workspace tab controls
   const tabEditorBtn = document.getElementById('wbTabEditorBtn');
@@ -1189,32 +1371,40 @@ export function adjustResponsiveWorkspace() {
   repositionAllRemoteCursors();
 }
 
+function getCanvasRect() {
+  if (!canvasBoundingRect && canvas) {
+    canvasBoundingRect = canvas.getBoundingClientRect();
+  }
+  return canvasBoundingRect || { top: 0, left: 0, width: 800, height: 600 };
+}
+
+function getTextCursorContainerRect() {
+  if (!textCursorContainerBoundingRect && textCursorContainer) {
+    textCursorContainerBoundingRect = textCursorContainer.getBoundingClientRect();
+  }
+  return textCursorContainerBoundingRect || { top: 0, left: 0 };
+}
+
 function resizeCanvas() {
   if (!canvas) return;
   
   const rect = canvas.parentElement.getBoundingClientRect();
-  const parentWidth = Math.floor(rect.width) || 800;
-  const parentHeight = Math.floor(rect.height) || 600;
+  const width = Math.floor(rect.width) || 800;
+  const height = Math.floor(rect.height) || 600;
   
-  // Enforce 16:9 aspect ratio
-  const targetRatio = 16 / 9;
-  let width = parentWidth;
-  let height = Math.floor(width / targetRatio);
-  
-  if (height > parentHeight) {
-    height = parentHeight;
-    width = Math.floor(height * targetRatio);
-  }
-  
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
   
   if (cursorContainer) {
-    cursorContainer.style.width = `${width}px`;
-    cursorContainer.style.height = `${height}px`;
+    cursorContainer.style.width = '100%';
+    cursorContainer.style.height = '100%';
   }
   
-  if (canvas.width === width && canvas.height === height) return;
+  if (canvas.width === width && canvas.height === height) {
+    canvasBoundingRect = canvas.getBoundingClientRect();
+    textCursorContainerBoundingRect = null;
+    return;
+  }
   
   // Cache current canvas image
   const tempCanvas = document.createElement('canvas');
@@ -1228,11 +1418,14 @@ function resizeCanvas() {
   
   // Restore canvas image stretched to new size
   ctx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height, 0, 0, canvas.width, canvas.height);
+  
+  canvasBoundingRect = canvas.getBoundingClientRect();
+  textCursorContainerBoundingRect = null;
 }
 
 function startDrawing(e) {
   isDrawing = true;
-  const rect = canvas.getBoundingClientRect();
+  const rect = getCanvasRect();
   lastX = e.clientX - rect.left;
   lastY = e.clientY - rect.top;
 }
@@ -1240,7 +1433,7 @@ function startDrawing(e) {
 function startDrawingTouch(e) {
   if (e.touches.length !== 1) return;
   isDrawing = true;
-  const rect = canvas.getBoundingClientRect();
+  const rect = getCanvasRect();
   lastX = e.touches[0].clientX - rect.left;
   lastY = e.touches[0].clientY - rect.top;
   e.preventDefault();
@@ -1248,20 +1441,23 @@ function startDrawingTouch(e) {
 
 function draw(e) {
   if (!isDrawing) return;
-  const rect = canvas.getBoundingClientRect();
+  const rect = getCanvasRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
   
   drawSegment(lastX, lastY, x, y, brushColor, brushSize);
   
   if (broadcastCallback) {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const h = canvas.height || 1;
     // Network Optimization: round normalized coordinates to 3 decimal places to reduce JSON string size by 75%
     broadcastCallback({
       type: 'wb-draw',
-      x0: Math.round((lastX / canvas.width) * 1000) / 1000,
-      y0: Math.round((lastY / canvas.height) * 1000) / 1000,
-      x1: Math.round((x / canvas.width) * 1000) / 1000,
-      y1: Math.round((y / canvas.height) * 1000) / 1000,
+      x0: Math.round(((lastX - cx) / h) * 1000) / 1000,
+      y0: Math.round(((lastY - cy) / h) * 1000) / 1000,
+      x1: Math.round(((x - cx) / h) * 1000) / 1000,
+      y1: Math.round(((y - cy) / h) * 1000) / 1000,
       color: brushColor,
       size: brushSize
     });
@@ -1273,19 +1469,22 @@ function draw(e) {
 
 function drawTouch(e) {
   if (!isDrawing || e.touches.length !== 1) return;
-  const rect = canvas.getBoundingClientRect();
+  const rect = getCanvasRect();
   const x = e.touches[0].clientX - rect.left;
   const y = e.touches[0].clientY - rect.top;
   
   drawSegment(lastX, lastY, x, y, brushColor, brushSize);
   
   if (broadcastCallback) {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const h = canvas.height || 1;
     broadcastCallback({
       type: 'wb-draw',
-      x0: Math.round((lastX / canvas.width) * 1000) / 1000,
-      y0: Math.round((lastY / canvas.height) * 1000) / 1000,
-      x1: Math.round((x / canvas.width) * 1000) / 1000,
-      y1: Math.round((y / canvas.height) * 1000) / 1000,
+      x0: Math.round(((lastX - cx) / h) * 1000) / 1000,
+      y0: Math.round(((lastY - cy) / h) * 1000) / 1000,
+      x1: Math.round(((x - cx) / h) * 1000) / 1000,
+      y1: Math.round(((y - cy) / h) * 1000) / 1000,
       color: brushColor,
       size: brushSize
     });
@@ -1325,11 +1524,14 @@ function drawSegment(x0, y0, x1, y1, color, size) {
 
 export function handleIncomingDraw(data) {
   if (!canvas) return;
-  // Denormalize coordinates
-  const x0 = data.x0 * canvas.width;
-  const y0 = data.y0 * canvas.height;
-  const x1 = data.x1 * canvas.width;
-  const y1 = data.y1 * canvas.height;
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const h = canvas.height;
+  // Denormalize coordinates uniformly
+  const x0 = data.x0 * h + cx;
+  const y0 = data.y0 * h + cy;
+  const x1 = data.x1 * h + cx;
+  const y1 = data.y1 * h + cy;
   
   drawSegment(x0, y0, x1, y1, data.color, data.size);
 }
@@ -1442,8 +1644,12 @@ export function handleIncomingCursor(peerId, data, username) {
     cursorEl.offsetHeight;
   }
   
-  const x = Math.round(data.x * cursorContainer.clientWidth);
-  const y = Math.round(data.y * cursorContainer.clientHeight);
+  const rect = getCanvasRect();
+  const cx = rect.width / 2;
+  const cy = rect.height / 2;
+  const h = rect.height;
+  const x = Math.round(data.x * h + cx);
+  const y = Math.round(data.y * h + cy);
   cursorEl.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   cursorEl.style.opacity = '1';
   
@@ -1580,11 +1786,15 @@ export function repositionAllRemoteCursors() {
   
   // Reposition whiteboard mouse pointers
   if (cursorContainer) {
+    const rect = getCanvasRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const h = rect.height;
     for (const [peerId, pointerData] of remotePointerMap.entries()) {
       const cursorEl = document.getElementById(`wb-cursor-${peerId}`);
       if (cursorEl) {
-        const x = Math.round(pointerData.x * cursorContainer.clientWidth);
-        const y = Math.round(pointerData.y * cursorContainer.clientHeight);
+        const x = Math.round(pointerData.x * h + cx);
+        const y = Math.round(pointerData.y * h + cy);
         cursorEl.style.transform = `translate3d(${x}px, ${y}px, 0)`;
       }
     }
@@ -1599,7 +1809,7 @@ function getCodeCaretCoordinates(position) {
   const coords = codeMirrorInstance.charCoords(pos, 'window');
   if (!textCursorContainer) return { top: 0, left: 0 };
   
-  const containerRect = textCursorContainer.getBoundingClientRect();
+  const containerRect = getTextCursorContainerRect();
   
   return {
     top: coords.top - containerRect.top,
@@ -1617,6 +1827,17 @@ function getCaretCoordinates(element, position) {
     mimicDiv.style.wordBreak = 'break-word';
     mimicDiv.style.overflowY = 'auto';
     mimicDiv.style.pointerEvents = 'none';
+    
+    // Allocate persistent DOM nodes for the hot path of text input
+    mimicTextBefore = document.createTextNode('');
+    mimicSpan = document.createElement('span');
+    mimicSpan.textContent = '|';
+    mimicTextAfter = document.createTextNode('');
+    
+    mimicDiv.appendChild(mimicTextBefore);
+    mimicDiv.appendChild(mimicSpan);
+    mimicDiv.appendChild(mimicTextAfter);
+    
     document.body.appendChild(mimicDiv);
   }
   
@@ -1636,24 +1857,18 @@ function getCaretCoordinates(element, position) {
   mimicDiv.style.top = `${rect.top + window.scrollY}px`;
   mimicDiv.style.left = `${rect.left + window.scrollX}px`;
   
+  // Update persistent node values directly (extremely fast, zero GC allocations)
   const text = element.value;
-  mimicDiv.textContent = text.substring(0, position);
-  
-  const span = document.createElement('span');
-  span.textContent = '|';
-  mimicDiv.appendChild(span);
-  
-  const nextText = document.createTextNode(element.value.substring(position));
-  mimicDiv.appendChild(nextText);
+  mimicTextBefore.nodeValue = text.substring(0, position);
+  mimicTextAfter.nodeValue = text.substring(position);
   
   mimicDiv.scrollTop = element.scrollTop;
   mimicDiv.scrollLeft = element.scrollLeft;
   
-  const spanRect = span.getBoundingClientRect();
-  const container = document.getElementById('wbTextCursorContainer');
-  if (!container) return { top: 0, left: 0 };
+  const spanRect = mimicSpan.getBoundingClientRect();
+  if (!textCursorContainer) return { top: 0, left: 0 };
   
-  const containerRect = container.getBoundingClientRect();
+  const containerRect = getTextCursorContainerRect();
   
   return {
     top: spanRect.top - containerRect.top,
@@ -1810,22 +2025,15 @@ export function handleIncomingStdin(content) {
 }
 
 export function cleanup() {
-  if (workspaceResizeHandler) {
-    window.removeEventListener('resize', workspaceResizeHandler);
-    workspaceResizeHandler = null;
-  }
-  if (breakpointResizeHandler) {
-    window.removeEventListener('resize', breakpointResizeHandler);
-    breakpointResizeHandler = null;
-  }
+  // We PRESERVE workspaceResizeHandler, canvasResizeObserver, and breakpointResizeHandler
+  // across sessions so that resizing and responsiveness continue to function when re-joining rooms.
   
   if (codeMirrorInstance) {
     try {
-      codeMirrorInstance.toTextArea();
+      codeMirrorInstance.setValue('');
     } catch (e) {
-      console.debug('Failed to tear down CodeMirror instance:', e);
+      console.debug('Failed to clear CodeMirror instance:', e);
     }
-    codeMirrorInstance = null;
   }
   
   const cursorContainer = document.getElementById('wbCursorContainer');
@@ -1845,10 +2053,11 @@ export function cleanup() {
   remoteTextCaretMap.clear();
   remotePointerMap.clear();
   
-  if (mimicDiv) {
-    mimicDiv.remove();
-    mimicDiv = null;
-  }
+  // Invalidate cached client rect dimensions
+  canvasBoundingRect = null;
+  textCursorContainerBoundingRect = null;
+  
+  // (We preserve mimicDiv to avoid DOM recreation overhead)
   
   const codeEditorWrapper = document.getElementById('wbCodeEditorWrapper');
   const terminalContainer = document.getElementById('wbTerminalContainer');

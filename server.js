@@ -185,6 +185,7 @@ app.use(
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'", "stun:", "turn:", "wss:", "ws:", "https://*.metered.live", "https://api.twilio.com", "https://ce.judge0.com"],
         mediaSrc: ["'self'", 'blob:'],
+        workerSrc: ["'self'", 'blob:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],

@@ -6,6 +6,8 @@ import * as stats from './modules/stats.js';
 const socket = io();
 
 const ROOM_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 const runtimeConfig = window.__VOIP_APP_CONFIG__ || {};
 const DEFAULT_ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -57,8 +59,7 @@ const rtcConfig = {
 // --- Crypto Utilities for Zero-Knowledge E2EE ---
 async function hashPassword(password) {
   if (!password) return '';
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
+  const data = textEncoder.encode(password);
   const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -66,11 +67,10 @@ async function hashPassword(password) {
 
 async function deriveChatKey(password, roomId) {
   if (!password) return null;
-  const encoder = new TextEncoder();
   const keyMaterial = await window.crypto.subtle.importKey(
-    'raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveBits', 'deriveKey']
+    'raw', textEncoder.encode(password), { name: 'PBKDF2' }, false, ['deriveBits', 'deriveKey']
   );
-  const salt = encoder.encode(roomId || 'default_salt');
+  const salt = textEncoder.encode(roomId || 'default_salt');
   return window.crypto.subtle.deriveKey(
     { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
     keyMaterial,
@@ -102,12 +102,11 @@ function base64ToBuffer(base64) {
 
 async function encryptMessage(key, text) {
   if (!key) return null;
-  const encoder = new TextEncoder();
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: iv },
     key,
-    encoder.encode(text)
+    textEncoder.encode(text)
   );
   return {
     payload: bufferToBase64(encrypted),
@@ -124,8 +123,7 @@ async function decryptMessage(key, encryptedBase64, ivBase64) {
     key,
     encrypted
   );
-  const decoder = new TextDecoder();
-  return decoder.decode(decrypted);
+  return textDecoder.decode(decrypted);
 }
 // ------------------------------------------------
 
@@ -442,7 +440,8 @@ function setCallControlsEnabled(enabled) {
   ui.recordBtn.disabled = !enabled;
   ui.attachFileBtn.disabled = !enabled || openDataChannelCount() === 0;
   if (ui.videoFilterBtn) ui.videoFilterBtn.disabled = !enabled;
-  if (ui.whiteboardBtn) ui.whiteboardBtn.disabled = !enabled;
+  // whiteboardBtn is always enabled — users can use the whiteboard before peers join
+  // if (ui.whiteboardBtn) ui.whiteboardBtn.disabled = !enabled;
   if (ui.ccBtn) ui.ccBtn.disabled = !enabled;
 }
 
@@ -689,7 +688,7 @@ function setupAudioAnalyser(stream, id) {
 
     const source = state.audioContext.createMediaStreamSource(stream);
     const analyser = state.audioContext.createAnalyser();
-    analyser.fftSize = 256;
+    analyser.fftSize = 32;
     analyser.smoothingTimeConstant = 0.4;
     source.connect(analyser);
 
@@ -1282,7 +1281,7 @@ function attachDataChannel(peerId, channel) {
     } else if (event.data instanceof ArrayBuffer) {
       if (event.data.byteLength < 16) return;
       const fileIdBytes = new Uint8Array(event.data, 0, 16);
-      const fileId = new TextDecoder().decode(fileIdBytes).trim();
+      const fileId = textDecoder.decode(fileIdBytes).trim();
       const chunk = event.data.slice(16);
 
       const fileState = state.incomingFiles.get(fileId);
@@ -2944,14 +2943,16 @@ function sendFileToPeer(peerId, file, fileId, callbacks) {
   let offset = 0;
   const reader = new FileReader();
 
+  // Pre-encode file ID header once to avoid TextEncoder instantiations in the loop
+  const fileIdStr = fileId.padEnd(16, ' ');
+  const fileIdBytes = textEncoder.encode(fileIdStr);
+
   reader.onload = (e) => {
     if (channel.readyState !== 'open') {
       callbacks.onFinished();
       return;
     }
     const chunk = e.target.result;
-    const fileIdStr = fileId.padEnd(16, ' ');
-    const fileIdBytes = new TextEncoder().encode(fileIdStr);
     const chunkWithHeader = new Uint8Array(16 + chunk.byteLength);
     chunkWithHeader.set(fileIdBytes, 0);
     chunkWithHeader.set(new Uint8Array(chunk), 16);
@@ -3241,22 +3242,32 @@ setStatus(
   supportsRequiredApis() ? 'info' : 'danger'
 );
 
-document.getElementById('tabChat').addEventListener('click', (e) => {
-  e.currentTarget.classList.add('active');
-  document.getElementById('tabParticipants').classList.remove('active');
-  document.getElementById('chatPanel').classList.remove('hidden');
-  document.getElementById('participantsPanel').classList.add('hidden');
-  
-  const badge = document.getElementById('chatUnreadBadge');
-  if (badge) badge.classList.add('hidden');
-});
+const _tabChat = document.getElementById('tabChat');
+const _tabParticipants = document.getElementById('tabParticipants');
 
-document.getElementById('tabParticipants').addEventListener('click', (e) => {
-  e.currentTarget.classList.add('active');
-  document.getElementById('tabChat').classList.remove('active');
-  document.getElementById('participantsPanel').classList.remove('hidden');
-  document.getElementById('chatPanel').classList.add('hidden');
-});
+if (_tabChat) {
+  _tabChat.addEventListener('click', (e) => {
+    e.currentTarget.classList.add('active');
+    if (_tabParticipants) _tabParticipants.classList.remove('active');
+    const chatPanel = document.getElementById('chatPanel');
+    const participantsPanel = document.getElementById('participantsPanel');
+    if (chatPanel) chatPanel.classList.remove('hidden');
+    if (participantsPanel) participantsPanel.classList.add('hidden');
+    const badge = document.getElementById('chatUnreadBadge');
+    if (badge) badge.classList.add('hidden');
+  });
+}
+
+if (_tabParticipants) {
+  _tabParticipants.addEventListener('click', (e) => {
+    e.currentTarget.classList.add('active');
+    if (_tabChat) _tabChat.classList.remove('active');
+    const participantsPanel = document.getElementById('participantsPanel');
+    const chatPanel = document.getElementById('chatPanel');
+    if (participantsPanel) participantsPanel.classList.remove('hidden');
+    if (chatPanel) chatPanel.classList.add('hidden');
+  });
+}
 
 const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
 if (toggleSidebarBtn) {

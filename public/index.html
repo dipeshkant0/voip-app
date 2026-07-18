@@ -14,7 +14,7 @@
     href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=Fira+Code:wght@400;500;600;700&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="dist/styles.css?v=1.0.2">
+  <link rel="stylesheet" href="dist/styles.css?v=1.0.0-1784413650452">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/monokai.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/hint/show-hint.min.css">
@@ -84,7 +84,7 @@
           <div style="flex: 1; display: flex; min-height: 0; position: relative;">
             <!-- Draw Board Panel -->
             <div id="wbDrawPanel" style="flex: 1; display: flex; flex-direction: column; position: relative; height: 100%;">
-              <div style="display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 24px; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--stroke); align-items: center;">
+              <div style="display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 12px; padding: 12px 24px; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--stroke); align-items: center; white-space: nowrap; max-width: 100%;">
                 <div style="display: flex; gap: 8px; align-items: center;">
                   <span style="font-size: 0.8rem; color: var(--muted);">Color:</span>
                   <button class="wb-color-btn active" data-color="#ffffff" style="background: #ffffff;"></button>
@@ -102,15 +102,15 @@
                 <button id="wbClearBtn" class="btn-secondary" style="padding: 4px 12px; font-size: 0.8rem; margin-left: auto;"><i class="fa-solid fa-trash-can"></i> Clear</button>
               </div>
               <div id="canvasWrapper" style="flex: 1; min-height: 0; position: relative; background: #181818;">
-                <canvas id="wbCanvas" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: block; cursor: crosshair;"></canvas>
-                <div id="wbCursorContainer" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; overflow: hidden; z-index: 10;"></div>
+                <canvas id="wbCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
+                <div id="wbCursorContainer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; z-index: 10;"></div>
               </div>
             </div>
 
             <!-- Text Editor Panel -->
             <div id="wbEditorPanel" class="hidden" style="flex: 1; display: none; flex-direction: column; background: #0c0c0c; height: 100%; position: relative;">
               <!-- Toolbar -->
-               <div id="wbEditorToolbar" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #141414; border-bottom: 1px solid var(--stroke); flex-shrink: 0; flex-wrap: wrap; gap: 8px;">
+                <div id="wbEditorToolbar" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #141414; border-bottom: 1px solid var(--stroke); flex-shrink: 0; flex-wrap: nowrap; overflow-x: auto; gap: 8px; white-space: nowrap; max-width: 100%;">
                  <div class="mode-toggles" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: nowrap;">
                    <div style="display: flex; gap: 4px; flex-shrink: 0; flex-wrap: nowrap;">
                      <button id="wbModeTextBtn" class="tab-btn active" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; border: none; font-weight: 600; cursor: pointer; color: var(--text); background: rgba(255,255,255,0.08); transition: background 0.2s; white-space: nowrap; flex-shrink: 0;">Simple Text</button>
@@ -235,7 +235,7 @@
               <line x1="8" y1="21" x2="16" y2="21"></line>
               <line x1="12" y1="17" x2="12" y2="21"></line>
             </svg></button>
-          <button id="whiteboardBtn" class="control-btn" title="Toggle Shared Workspace" disabled>
+          <button id="whiteboardBtn" class="control-btn" title="Toggle Shared Workspace">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"></path>
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
@@ -465,6 +465,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/closebrackets.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/selection/active-line.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/mode/simple.min.js"></script>
   
   <!-- CodeMirror Modes -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/javascript/javascript.min.js"></script>
@@ -473,7 +474,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/rust/rust.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/shell/shell.min.js"></script>
 
-  <script src="dist/bundle.js?v=1.0.2"></script>
+  <script src="dist/bundle.js?v=1.0.0-1784413650452"></script>
 
 </body>
 

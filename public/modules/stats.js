@@ -1,6 +1,7 @@
 let isStatsEnabled = false;
 let statsIntervalId = null;
 const lastStatsMap = new Map();
+const badgeCacheMap = new Map();
 let getPeersCallback = null;
 
 export function init(getPeersFn) {
@@ -23,6 +24,7 @@ export function stopPolling() {
 export function cleanup() {
   stopPolling();
   isStatsEnabled = false;
+  badgeCacheMap.clear();
   
   const statsBtn = document.getElementById('statsBtn');
   if (statsBtn) {
@@ -42,6 +44,14 @@ function toggleStats() {
       statsBtn.classList.add('active');
       statsBtn.style.color = 'var(--success)';
       startPolling();
+      // Give feedback if no peers are connected
+      const peers = getPeersCallback ? getPeersCallback() : null;
+      const hasPeers = peers && peers.size > 0;
+      if (!hasPeers) {
+        if (typeof window.showToast === 'function') {
+          window.showToast('Stats enabled — will show badges when peers connect.', 'info', 3000);
+        }
+      }
     } else {
       statsBtn.classList.remove('active');
       statsBtn.style.color = '';
@@ -66,6 +76,7 @@ function hideAllBadges() {
 
 export function cleanupPeerStats(peerId) {
   lastStatsMap.delete(peerId + '-inbound');
+  badgeCacheMap.delete(peerId);
   const badge = document.getElementById(`stats-badge-${peerId}`);
   if (badge) {
     badge.remove();
@@ -131,39 +142,50 @@ async function updateStats() {
 }
 
 function updateBadge(peerId, width, height, fps, rtt, loss, kbps) {
-  const badgeId = `stats-badge-${peerId}`;
-  let badgeEl = document.getElementById(badgeId);
+  let cached = badgeCacheMap.get(peerId);
   
-  if (!badgeEl) {
-    const wrapper = document.getElementById(`video-wrapper-${peerId}`);
-    if (wrapper) {
-      badgeEl = document.createElement('div');
-      badgeEl.id = badgeId;
-      badgeEl.className = 'stats-badge';
-      badgeEl.innerHTML = `
-        <div class="stats-grid">
-          <div class="stat-item"><i class="fas fa-expand"></i> <span class="stat-res">---</span></div>
-          <div class="stat-item"><i class="fas fa-bolt"></i> <span class="stat-fps">0 fps</span></div>
-          <div class="stat-item"><i class="fas fa-tachometer-alt"></i> <span class="stat-bitrate">0 kbps</span></div>
-          <div class="stat-item stat-rtt-item"><i class="fas fa-clock"></i> <span class="stat-rtt">0ms</span></div>
-          <div class="stat-item stat-loss-item" style="grid-column: span 2;"><i class="fas fa-exclamation-triangle"></i> <span class="stat-loss">Loss: 0</span></div>
-        </div>
-      `;
-      wrapper.appendChild(badgeEl);
+  if (!cached) {
+    const badgeId = `stats-badge-${peerId}`;
+    let badgeEl = document.getElementById(badgeId);
+    
+    if (!badgeEl) {
+      const wrapper = document.getElementById(`video-wrapper-${peerId}`);
+      if (wrapper) {
+        badgeEl = document.createElement('div');
+        badgeEl.id = badgeId;
+        badgeEl.className = 'stats-badge';
+        badgeEl.innerHTML = `
+          <div class="stats-grid">
+            <div class="stat-item"><i class="fas fa-expand"></i> <span class="stat-res">---</span></div>
+            <div class="stat-item"><i class="fas fa-bolt"></i> <span class="stat-fps">0 fps</span></div>
+            <div class="stat-item"><i class="fas fa-tachometer-alt"></i> <span class="stat-bitrate">0 kbps</span></div>
+            <div class="stat-item stat-rtt-item"><i class="fas fa-clock"></i> <span class="stat-rtt">0ms</span></div>
+            <div class="stat-item stat-loss-item" style="grid-column: span 2;"><i class="fas fa-exclamation-triangle"></i> <span class="stat-loss">Loss: 0</span></div>
+          </div>
+        `;
+        wrapper.appendChild(badgeEl);
+      }
+    }
+    
+    if (badgeEl) {
+      cached = {
+        badgeEl,
+        resSpan: badgeEl.querySelector('.stat-res'),
+        fpsSpan: badgeEl.querySelector('.stat-fps'),
+        bitrateSpan: badgeEl.querySelector('.stat-bitrate'),
+        rttSpan: badgeEl.querySelector('.stat-rtt'),
+        rttItem: badgeEl.querySelector('.stat-rtt-item'),
+        lossSpan: badgeEl.querySelector('.stat-loss'),
+        lossItem: badgeEl.querySelector('.stat-loss-item')
+      };
+      badgeCacheMap.set(peerId, cached);
     }
   }
   
-  if (badgeEl) {
+  if (cached) {
+    const { badgeEl, resSpan, fpsSpan, bitrateSpan, rttSpan, rttItem, lossSpan, lossItem } = cached;
     if (isStatsEnabled) {
       badgeEl.style.display = 'block';
-      
-      const resSpan = badgeEl.querySelector('.stat-res');
-      const fpsSpan = badgeEl.querySelector('.stat-fps');
-      const bitrateSpan = badgeEl.querySelector('.stat-bitrate');
-      const rttSpan = badgeEl.querySelector('.stat-rtt');
-      const rttItem = badgeEl.querySelector('.stat-rtt-item');
-      const lossSpan = badgeEl.querySelector('.stat-loss');
-      const lossItem = badgeEl.querySelector('.stat-loss-item');
       
       if (resSpan) resSpan.textContent = width && height ? `${width}x${height}` : '---';
       if (fpsSpan) fpsSpan.textContent = `${fps || 0} fps`;
