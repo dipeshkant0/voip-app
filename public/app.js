@@ -470,10 +470,13 @@ function stopStream(stream) {
 
 function clearLocalAudioAnalyser() {
   if (!state.audioAnalysers.has('local')) return;
-  try {
-    state.audioAnalysers.get('local').source.disconnect();
-  } catch (e) {
-    console.debug('Local audio analyser source already disconnected or missing:', e);
+  const analyserData = state.audioAnalysers.get('local');
+  if (analyserData) {
+    try { analyserData.source.disconnect(); } catch (e) {}
+    const participantEl = analyserData.participantEl || document.getElementById('participant-local');
+    const videoWrapperEl = analyserData.videoWrapperEl || document.getElementById('video-wrapper-local');
+    if (participantEl) participantEl.classList.remove('active-speaker');
+    if (videoWrapperEl) videoWrapperEl.classList.remove('active-speaker');
   }
   state.audioAnalysers.delete('local');
 
@@ -689,14 +692,22 @@ function setupAudioAnalyser(stream, id) {
 
     const source = state.audioContext.createMediaStreamSource(stream);
     const analyser = state.audioContext.createAnalyser();
-    analyser.fftSize = 32;
-    analyser.smoothingTimeConstant = 0.4;
+    analyser.fftSize = 64; // 32 frequency bins
+    analyser.smoothingTimeConstant = 0.5;
     source.connect(analyser);
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     const participantEl = document.getElementById(`participant-${id}`);
     const videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
-    state.audioAnalysers.set(id, { analyser, source, dataArray, participantEl, videoWrapperEl });
+    state.audioAnalysers.set(id, {
+      analyser,
+      source,
+      dataArray,
+      participantEl,
+      videoWrapperEl,
+      lastSpeakingTime: 0,
+      speakingState: false
+    });
 
     if (!speakerPollIntervalId) {
       speakerPollIntervalId = setInterval(pollActiveSpeakers, 100);
@@ -715,24 +726,69 @@ function pollActiveSpeakers() {
     return;
   }
 
+  const now = Date.now();
+
   state.audioAnalysers.forEach((analyserData, id) => {
-    const { analyser, dataArray } = analyserData;
-    analyser.getByteFrequencyData(dataArray);
-    let sum = 0;
-    for (let i = 0; i < dataArray.length; i++) {
-      sum += dataArray[i];
-    }
-    const isSpeaking = (sum / dataArray.length) > 15;
-
-    if (!analyserData.participantEl || !analyserData.participantEl.isConnected) {
-      analyserData.participantEl = document.getElementById(`participant-${id}`);
-    }
-    if (!analyserData.videoWrapperEl || !analyserData.videoWrapperEl.isConnected) {
-      analyserData.videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
+    // 1. Verify track availability and mute/enabled status
+    let isTrackLiveAndEnabled = false;
+    if (id === 'local') {
+      const track = currentTrack();
+      isTrackLiveAndEnabled = Boolean(track && track.enabled && !track.muted && track.readyState === 'live');
+    } else {
+      const peer = getPeerState(id);
+      const remoteTrack = peer?.remoteStream?.getAudioTracks()[0];
+      isTrackLiveAndEnabled = Boolean(remoteTrack && remoteTrack.enabled && !remoteTrack.muted && remoteTrack.readyState === 'live');
     }
 
-    if (analyserData.participantEl) analyserData.participantEl.classList.toggle('active-speaker', isSpeaking);
-    if (analyserData.videoWrapperEl) analyserData.videoWrapperEl.classList.toggle('active-speaker', isSpeaking);
+    let rawSpeaking = false;
+
+    if (isTrackLiveAndEnabled) {
+      const { analyser, dataArray } = analyserData;
+      analyser.getByteFrequencyData(dataArray);
+
+      // Filter out Bin 0 (0-750Hz DC offset & electrical/mic fan hum)
+      // Focus on vocal range bins 1 to 7 (~750 Hz - ~5600 Hz)
+      let voiceSum = 0;
+      let voiceBinsCount = 0;
+      let peak = 0;
+
+      for (let i = 1; i < Math.min(8, dataArray.length); i++) {
+        const val = dataArray[i];
+        voiceSum += val;
+        voiceBinsCount++;
+        if (val > peak) peak = val;
+      }
+
+      const voiceAvg = voiceBinsCount > 0 ? (voiceSum / voiceBinsCount) : 0;
+
+      // Voice detection criteria: requires genuine voice energy (average > 25 and peak > 40 out of 255)
+      rawSpeaking = voiceAvg > 25 && peak > 40;
+    }
+
+    // 2. Hangover timer (450ms) to eliminate flickering during natural speech pauses
+    if (rawSpeaking) {
+      analyserData.lastSpeakingTime = now;
+    }
+
+    const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && (rawSpeaking || (now - analyserData.lastSpeakingTime < 450));
+
+    if (analyserData.speakingState !== shouldBeMarkedSpeaking) {
+      analyserData.speakingState = shouldBeMarkedSpeaking;
+
+      if (!analyserData.participantEl || !analyserData.participantEl.isConnected) {
+        analyserData.participantEl = document.getElementById(`participant-${id}`);
+      }
+      if (!analyserData.videoWrapperEl || !analyserData.videoWrapperEl.isConnected) {
+        analyserData.videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
+      }
+
+      if (analyserData.participantEl) {
+        analyserData.participantEl.classList.toggle('active-speaker', shouldBeMarkedSpeaking);
+      }
+      if (analyserData.videoWrapperEl) {
+        analyserData.videoWrapperEl.classList.toggle('active-speaker', shouldBeMarkedSpeaking);
+      }
+    }
   });
 }
 
