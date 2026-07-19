@@ -164,6 +164,7 @@ const state = {
   username: '',
   audioAnalysers: new Map(), // peerId -> analyser
   videoEnabled: false,
+  rawCameraTrack: null,
   screenSharing: false,
   screenAudioContext: null,
   mixedAudioTrack: null,
@@ -1104,8 +1105,24 @@ function requestRoomJoin(payload) {
 }
 
 function stopLocalStream() {
-  stopStream(state.localStream);
-  stopStream(state.rawStream);
+  if (state.rawCameraTrack) {
+    try { state.rawCameraTrack.stop(); } catch (e) {}
+    state.rawCameraTrack = null;
+  }
+  try {
+    filters.processTrack(null);
+  } catch (e) {}
+
+  if (state.localStream) {
+    state.localStream.getTracks().forEach(track => {
+      try { track.stop(); } catch (e) {}
+    });
+  }
+  if (state.rawStream) {
+    state.rawStream.getTracks().forEach(track => {
+      try { track.stop(); } catch (e) {}
+    });
+  }
   state.localStream = null;
   state.rawStream = null;
 
@@ -2431,13 +2448,23 @@ function turnOffVideo() {
   
   const previousVideoTrack = currentVideoTrack();
   state.videoEnabled = false;
-  rebuildLocalStream(currentTrack(), null);
+
+  if (state.rawCameraTrack) {
+    try { state.rawCameraTrack.stop(); } catch (e) {}
+    state.rawCameraTrack = null;
+  }
+
   try {
     filters.processTrack(null);
   } catch (e) {
     console.debug('Failed to reset visual filter on turnOffVideo:', e);
   }
-  if (previousVideoTrack) previousVideoTrack.stop();
+
+  if (previousVideoTrack && previousVideoTrack !== state.rawCameraTrack) {
+    try { previousVideoTrack.stop(); } catch (e) {}
+  }
+
+  rebuildLocalStream(currentTrack(), null);
   updateLocalVideoPreview();
   
   ui.videoBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`; 
@@ -2468,17 +2495,23 @@ async function toggleVideo() {
         stopStream(cameraStream);
         throw new Error('No live camera track was returned.');
       }
+
+      if (state.rawCameraTrack && state.rawCameraTrack !== rawVideoTrack) {
+        try { state.rawCameraTrack.stop(); } catch (e) {}
+      }
+      state.rawCameraTrack = rawVideoTrack;
+
       let videoTrack = await filters.processTrack(rawVideoTrack);
 
       const previousVideoTrack = currentVideoTrack();
       state.videoEnabled = true;
       rebuildLocalStream(currentTrack(), videoTrack);
-      if (previousVideoTrack && previousVideoTrack !== videoTrack) {
-        previousVideoTrack.stop();
+      if (previousVideoTrack && previousVideoTrack !== videoTrack && previousVideoTrack !== rawVideoTrack) {
+        try { previousVideoTrack.stop(); } catch (e) {}
       }
 
       videoTrack.onended = () => {
-        if (currentVideoTrack() === videoTrack) {
+        if (currentVideoTrack() === videoTrack || state.rawCameraTrack === rawVideoTrack) {
           turnOffVideo();
           applyLocalTracksToAllPeers();
         }
@@ -2496,6 +2529,10 @@ async function toggleVideo() {
   } catch (error) {
     console.error('Camera toggle failed:', error);
     state.videoEnabled = false;
+    if (state.rawCameraTrack) {
+      try { state.rawCameraTrack.stop(); } catch (e) {}
+      state.rawCameraTrack = null;
+    }
     ui.videoBtn.innerHTML = '<i class="fa-solid fa-video-slash"></i>'; 
     ui.videoBtn.classList.remove('active');
     showToast('Camera access failed. Check permissions.', 'error');
@@ -3106,12 +3143,19 @@ if (ui.midCallCameraSelect) {
         });
         let rawVideoTrack = cameraStream.getVideoTracks()[0] || null;
         if (rawVideoTrack) {
+          if (state.rawCameraTrack && state.rawCameraTrack !== rawVideoTrack) {
+            try { state.rawCameraTrack.stop(); } catch (e) {}
+          }
+          state.rawCameraTrack = rawVideoTrack;
+
           let videoTrack = await filters.processTrack(rawVideoTrack);
           const previousVideoTrack = currentVideoTrack();
           rebuildLocalStream(currentTrack(), videoTrack);
           updateLocalVideoPreview();
           applyLocalTracksToAllPeers();
-          if (previousVideoTrack) previousVideoTrack.stop();
+          if (previousVideoTrack && previousVideoTrack !== videoTrack && previousVideoTrack !== rawVideoTrack) {
+            try { previousVideoTrack.stop(); } catch (e) {}
+          }
           showToast('Camera switched successfully.', 'success');
         }
       } catch (e) {

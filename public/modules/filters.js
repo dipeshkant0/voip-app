@@ -79,24 +79,23 @@ export function init(onTrackChanged) {
 
 export async function processTrack(track) {
   if (!track) {
-    stopProcessing(true);
-    rawTrack = null;
+    stopProcessing(true, true);
     return null;
   }
   
   if (currentFilter === 'none') {
-    stopProcessing(true);
+    stopProcessing(true, false);
     rawTrack = track;
     return track;
   }
   
-  if (rawTrack === track && filteredTrack) {
+  if (rawTrack === track && filteredTrack && filteredTrack.readyState === 'live') {
     return filteredTrack;
   }
   
   // Stop previous processing if track changes
   if (rawTrack !== track) {
-    stopProcessing(false);
+    stopProcessing(false, true);
     rawTrack = track;
   }
   
@@ -163,8 +162,7 @@ function startProcessing() {
           
           // Propagate track end event from rawTrack
           rawTrack.onended = () => {
-            stopProcessing();
-            if (filteredTrack) filteredTrack.stop();
+            stopProcessing(true, true);
           };
         }
         resolve(filteredTrack);
@@ -262,15 +260,29 @@ function stopLoop() {
   }
 }
 
-function stopProcessing(forceStreamDestroy = false) {
+function stopProcessing(forceStreamDestroy = false, releaseRaw = false) {
   stopLoop();
   if (videoEl) {
     videoEl.pause();
-    videoEl.srcObject = null;
+    if (videoEl.srcObject) {
+      try {
+        const str = videoEl.srcObject;
+        if (str && str.getTracks) {
+          str.getTracks().forEach(t => {
+            if (releaseRaw) { try { t.stop(); } catch(e) {} }
+          });
+        }
+      } catch (e) {}
+      videoEl.srcObject = null;
+    }
+  }
+  if (releaseRaw && rawTrack) {
+    try { rawTrack.stop(); } catch (e) {}
+    rawTrack = null;
   }
   if (forceStreamDestroy) {
     if (filteredTrack) {
-      filteredTrack.stop();
+      try { filteredTrack.stop(); } catch (e) {}
       filteredTrack = null;
     }
     filteredStream = null;
