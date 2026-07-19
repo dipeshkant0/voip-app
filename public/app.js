@@ -754,6 +754,7 @@ function setupAudioAnalyser(stream, id) {
     state.audioAnalysers.set(id, {
       analyser,
       source,
+      stream,
       dataArray,
       participantEl,
       videoWrapperEl,
@@ -784,14 +785,15 @@ function pollActiveSpeakers() {
   state.audioAnalysers.forEach((analyserData, id) => {
     // 1. Verify track availability and mute/enabled status
     let isTrackLiveAndEnabled = false;
+    let track = null;
+
     if (id === 'local') {
-      const track = currentTrack();
-      isTrackLiveAndEnabled = Boolean(track && track.enabled && !track.muted && track.readyState === 'live');
+      track = currentTrack();
     } else {
-      const peer = getPeerState(id);
-      const remoteTrack = peer?.remoteStream?.getAudioTracks()[0];
-      isTrackLiveAndEnabled = Boolean(remoteTrack && remoteTrack.enabled && !remoteTrack.muted && remoteTrack.readyState === 'live');
+      track = analyserData.stream ? analyserData.stream.getAudioTracks()[0] : null;
     }
+
+    isTrackLiveAndEnabled = Boolean(track && track.enabled && !track.muted && track.readyState === 'live');
 
     let rawSpeaking = false;
     // Skip the first 400ms after connecting to discard initial WebAudio buffer pop / click transient
@@ -816,8 +818,8 @@ function pollActiveSpeakers() {
 
       const voiceAvg = voiceBinsCount > 0 ? (voiceSum / voiceBinsCount) : 0;
 
-      // Genuine voice detection threshold: requires voiceAvg > 35 AND peak > 60 out of 255
-      rawSpeaking = voiceAvg > 35 && peak > 60;
+      // Genuine voice detection threshold:
+      rawSpeaking = voiceAvg > 20 && peak > 35;
     }
 
     if (rawSpeaking) {
