@@ -693,18 +693,24 @@ function setupAudioAnalyser(stream, id) {
     const source = state.audioContext.createMediaStreamSource(stream);
     const analyser = state.audioContext.createAnalyser();
     analyser.fftSize = 64; // 32 frequency bins
-    analyser.smoothingTimeConstant = 0.5;
+    analyser.smoothingTimeConstant = 0.6;
     source.connect(analyser);
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     const participantEl = document.getElementById(`participant-${id}`);
     const videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
+
+    // Clean initial DOM state (prevent starting marked)
+    if (participantEl) participantEl.classList.remove('active-speaker');
+    if (videoWrapperEl) videoWrapperEl.classList.remove('active-speaker');
+
     state.audioAnalysers.set(id, {
       analyser,
       source,
       dataArray,
       participantEl,
       videoWrapperEl,
+      initTime: Date.now(),
       lastSpeakingTime: 0,
       speakingState: false
     });
@@ -741,8 +747,10 @@ function pollActiveSpeakers() {
     }
 
     let rawSpeaking = false;
+    // Skip the first 400ms after connecting to discard initial WebAudio buffer pop / click transient
+    const isWarmedUp = (now - analyserData.initTime) > 400;
 
-    if (isTrackLiveAndEnabled) {
+    if (isTrackLiveAndEnabled && isWarmedUp) {
       const { analyser, dataArray } = analyserData;
       analyser.getByteFrequencyData(dataArray);
 
@@ -761,16 +769,19 @@ function pollActiveSpeakers() {
 
       const voiceAvg = voiceBinsCount > 0 ? (voiceSum / voiceBinsCount) : 0;
 
-      // Voice detection criteria: requires genuine voice energy (average > 25 and peak > 40 out of 255)
-      rawSpeaking = voiceAvg > 25 && peak > 40;
+      // Genuine voice detection threshold: requires voiceAvg > 35 AND peak > 60 out of 255
+      rawSpeaking = voiceAvg > 35 && peak > 60;
     }
 
-    // 2. Hangover timer (450ms) to eliminate flickering during natural speech pauses
     if (rawSpeaking) {
       analyserData.lastSpeakingTime = now;
     }
 
-    const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && (rawSpeaking || (now - analyserData.lastSpeakingTime < 450));
+    if (!isTrackLiveAndEnabled) {
+      analyserData.lastSpeakingTime = 0;
+    }
+
+    const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || (now - analyserData.lastSpeakingTime < 400));
 
     if (analyserData.speakingState !== shouldBeMarkedSpeaking) {
       analyserData.speakingState = shouldBeMarkedSpeaking;
