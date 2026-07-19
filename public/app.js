@@ -178,10 +178,9 @@ const state = {
 
 let mediaRecorder;
 let recordedChunks = [];
-let recordingTabAudioSource = null;
-let recordingMicAudioSource = null;
-let recordingFileHandle = null;
-let recordingWritableStream = null;
+let recordingAudioContext = null;
+let recordingAudioDestination = null;
+let recordingAudioSources = new Map();
 let speakerPollIntervalId = null;
 let activeBlobUrls = [];
 
@@ -190,129 +189,178 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const FILE_CHUNK_SIZE = 16 * 1024;
 const DATA_CHANNEL_HIGH_WATER = 1024 * 1024;
 
-async function startRecording() {
-  try {
-    showToast('Warning: Please do not share the current tab to prevent severe audio echo.', 'warning');
-
-    if (window.showSaveFilePicker) {
-      try {
-        recordingFileHandle = await window.showSaveFilePicker({
-          suggestedName: `Meeting-Recording-${new Date().toISOString()}.webm`,
-          types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
-        });
-        recordingWritableStream = await recordingFileHandle.createWritable();
-      } catch (err) {
-        showToast('Recording cancelled (no file selected).', 'warning');
-        return;
-      }
+function getRecordingMimeType() {
+  const types = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+    'video/mp4'
+  ];
+  for (const t of types) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) {
+      return t;
     }
+  }
+  return '';
+}
 
-    let displayStream;
-    let mixedStream;
-    let audioContext;
+function addPeerToRecordingAudio(id, stream) {
+  if (!state.recording || !recordingAudioContext || !recordingAudioDestination) return;
+  if (recordingAudioContext.state === 'closed') return;
+  if (recordingAudioSources.has(id)) return;
 
-    if (state.screenSharing && state.localVideoTrack) {
-      const tracks = [state.localVideoTrack];
-      if (state.mixedAudioTrack) tracks.push(state.mixedAudioTrack);
-      mixedStream = new MediaStream(tracks);
+  try {
+    const audioTrack = stream.getAudioTracks()[0];
+    if (audioTrack && audioTrack.readyState === 'live') {
+      const source = recordingAudioContext.createMediaStreamSource(new MediaStream([audioTrack]));
+      source.connect(recordingAudioDestination);
+      recordingAudioSources.set(id, source);
+    }
+  } catch (e) {
+    console.debug(`Failed to attach audio stream for ${id} to session recording:`, e);
+  }
+}
+
+async function startRecording() {
+  if (state.recording) return;
+
+  try {
+    let displayStream = null;
+    let videoTrack = null;
+
+    if (state.screenSharing && state.localVideoTrack && state.localVideoTrack.readyState === 'live') {
+      videoTrack = state.localVideoTrack;
     } else {
       displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: "browser" },
-        audio: true,
-        surfaceSwitching: "include",
-        selfBrowserSurface: "exclude",
-        preferCurrentTab: false
+        video: { displaySurface: 'browser' },
+        audio: true
       });
-
-      audioContext = new window.AudioContext();
-      const dest = audioContext.createMediaStreamDestination();
-      
-      if (displayStream.getAudioTracks().length > 0) {
-        recordingTabAudioSource = audioContext.createMediaStreamSource(displayStream);
-        recordingTabAudioSource.connect(dest);
+      videoTrack = displayStream.getVideoTracks()[0] || null;
+      if (!videoTrack || videoTrack.readyState !== 'live') {
+        if (displayStream) displayStream.getTracks().forEach(t => t.stop());
+        throw new Error('No live video track selected for recording.');
       }
-      const localMic = currentTrack();
-      if (localMic) {
-        recordingMicAudioSource = audioContext.createMediaStreamSource(new MediaStream([localMic]));
-        recordingMicAudioSource.connect(dest);
-      }
-
-      mixedStream = new MediaStream([
-        ...displayStream.getVideoTracks(),
-        ...dest.stream.getAudioTracks()
-      ]);
-      
-      displayStream.getVideoTracks()[0].onended = () => {
-        stopRecording();
-      };
     }
 
+    // Initialize AudioContext & Destination for full meeting audio mixing
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    recordingAudioContext = new AudioContextCtor();
+    if (recordingAudioContext.state === 'suspended') {
+      await recordingAudioContext.resume().catch(() => {});
+    }
+    recordingAudioDestination = recordingAudioContext.createMediaStreamDestination();
+    recordingAudioSources.clear();
+
+    // 1. Connect Local Microphone
+    const localMic = currentTrack();
+    if (localMic && localMic.readyState === 'live') {
+      try {
+        const micSource = recordingAudioContext.createMediaStreamSource(new MediaStream([localMic]));
+        micSource.connect(recordingAudioDestination);
+        recordingAudioSources.set('local', micSource);
+      } catch (e) {
+        console.debug('Failed to connect local mic to recorder:', e);
+      }
+    }
+
+    // 2. Connect Display/Tab Audio (if provided by getDisplayMedia)
+    if (displayStream && displayStream.getAudioTracks().length > 0) {
+      try {
+        const tabAudioSource = recordingAudioContext.createMediaStreamSource(displayStream);
+        tabAudioSource.connect(recordingAudioDestination);
+        recordingAudioSources.set('displayTab', tabAudioSource);
+      } catch (e) {
+        console.debug('Failed to connect display tab audio to recorder:', e);
+      }
+    }
+
+    // 3. Connect All Remote Peers' Audio Tracks
+    state.peers.forEach((peer, peerId) => {
+      const audioEl = document.getElementById(`audio-${peerId}`);
+      if (audioEl && audioEl.srcObject) {
+        addPeerToRecordingAudio(peerId, audioEl.srcObject);
+      }
+    });
+
+    // Assemble final mixed stream (Video + Mixed Room Audio)
+    const mixedAudioTracks = recordingAudioDestination.stream.getAudioTracks();
+    const tracksToRecord = [videoTrack];
+    if (mixedAudioTracks.length > 0) {
+      tracksToRecord.push(mixedAudioTracks[0]);
+    }
+
+    const mixedStream = new MediaStream(tracksToRecord);
     state.recording = true;
     recordedChunks = [];
 
-    mediaRecorder = new MediaRecorder(mixedStream, { mimeType: 'video/webm' });
+    const mimeType = getRecordingMimeType();
+    mediaRecorder = new MediaRecorder(mixedStream, mimeType ? { mimeType } : undefined);
 
-    mediaRecorder.ondataavailable = async (e) => {
-      if (e.data.size > 0) {
-        if (recordingWritableStream) {
-          try {
-            await recordingWritableStream.write(e.data);
-          } catch (writeError) {
-            console.error('File write failed, falling back to RAM:', writeError);
-            recordedChunks.push(e.data);
-          }
-        } else {
-          recordedChunks.push(e.data);
-        }
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        recordedChunks.push(e.data);
       }
     };
 
-    mediaRecorder.onstop = async () => {
-      if (recordingWritableStream) {
-        await recordingWritableStream.close();
-        recordingWritableStream = null;
-        recordingFileHandle = null;
-        showToast('Recording saved successfully.', 'success');
-      } else if (recordedChunks.length > 0) {
-        const blob = new Blob(recordedChunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
+    mediaRecorder.onstop = () => {
+      const recordedBlob = new Blob(recordedChunks, { type: mimeType || 'video/webm' });
+      if (recordedBlob.size > 0) {
+        const url = URL.createObjectURL(recordedBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Meeting-Recording-${new Date().toISOString()}.webm`;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `Session-Recording-${timestamp}.webm`;
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
-        recordedChunks = [];
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 1000);
+        showToast('Session recording saved and downloaded.', 'success');
+      } else {
+        showToast('Recording ended (no video/audio captured).', 'warning');
       }
-      
-      if (!state.screenSharing && displayStream) {
-        mixedStream.getTracks().forEach(t => t.stop());
+
+      recordedChunks = [];
+
+      // Disconnect audio sources
+      recordingAudioSources.forEach(src => {
+        try { src.disconnect(); } catch (e) {}
+      });
+      recordingAudioSources.clear();
+
+      if (recordingAudioContext && recordingAudioContext.state !== 'closed') {
+        recordingAudioContext.close().catch(() => {});
+        recordingAudioContext = null;
+      }
+      recordingAudioDestination = null;
+
+      if (displayStream) {
         displayStream.getTracks().forEach(t => t.stop());
-      }
-
-      if (recordingTabAudioSource) {
-        recordingTabAudioSource.disconnect();
-        recordingTabAudioSource = null;
-      }
-      if (recordingMicAudioSource) {
-        recordingMicAudioSource.disconnect();
-        recordingMicAudioSource = null;
-      }
-
-      if (audioContext && audioContext.state !== 'closed') {
-        audioContext.close().catch(console.error);
       }
     };
 
+    // Auto-stop recording if user ends display capture via browser bar
+    if (displayStream && videoTrack) {
+      videoTrack.onended = () => {
+        if (state.recording) stopRecording();
+      };
+    }
+
     mediaRecorder.start(1000);
-    
+
     ui.recordBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>`;
-    ui.recordBtn.classList.add('danger');
-    ui.recordBtn.classList.add('active');
-    showToast('Recording started.', 'info');
+    ui.recordBtn.classList.add('danger', 'active');
+    showToast('Session recording started. Capturing full room audio & video.', 'info');
 
   } catch (error) {
-    console.warn("Recording cancelled or failed:", error);
-    showToast('Recording was cancelled or is unsupported.', 'warning');
+    state.recording = false;
+    console.warn('Session recording failed or was cancelled:', error);
+    if (error.name !== 'NotAllowedError' && error.name !== 'AbortError') {
+      showToast('Could not start recording. Check permissions.', 'error');
+    } else {
+      showToast('Recording cancelled.', 'info');
+    }
   }
 }
 
@@ -321,12 +369,11 @@ function stopRecording() {
   state.recording = false;
 
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+    try { mediaRecorder.stop(); } catch (e) {}
   }
 
   ui.recordBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>`;
-  ui.recordBtn.classList.remove('danger');
-  ui.recordBtn.classList.remove('active');
+  ui.recordBtn.classList.remove('danger', 'active');
 }
 
 async function toggleRecording() {
@@ -1577,6 +1624,7 @@ function ensurePeer(peerId, providedUsername = null) {
       audioEl.srcObject = safeAudioStream;
       audioEl.play().catch(e => console.warn('Audio auto-play prevented:', e));
       setupAudioAnalyser(safeAudioStream, peerId);
+      addPeerToRecordingAudio(peerId, safeAudioStream);
     }
   };
 
