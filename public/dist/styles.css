@@ -230,8 +230,8 @@ select:focus {
 .stats-badge {
   position: absolute;
   top: 14px;
-  right: 14px;
-  left: auto;
+  left: 14px;
+  right: auto;
   background: rgba(10, 10, 15, 0.95);
   backdrop-filter: blur(12px);
   border: 1px solid #00f0ff;
@@ -1071,7 +1071,8 @@ select:focus {
 .video-mute-icon {
   position: absolute;
   top: 16px;
-  left: 16px;
+  right: 16px;
+  left: auto;
   background: rgba(225, 29, 72, 0.9);
   color: white;
   width: 32px;
@@ -1658,7 +1659,8 @@ li.CodeMirror-hint-active {
 .latency-badge {
   position: absolute;
   top: 16px;
-  right: 16px;
+  left: 16px;
+  right: auto;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1849,7 +1851,8 @@ li.CodeMirror-hint-active {
 .unpin-btn {
   position: absolute;
   top: 16px;
-  left: 16px;
+  right: 16px;
+  left: auto;
   background: rgba(239, 68, 68, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 50%;
@@ -1877,4 +1880,5 @@ li.CodeMirror-hint-active {
 
 .video-wrapper.focused .video-mute-icon {
   top: 60px;
+  right: 16px;
 }
