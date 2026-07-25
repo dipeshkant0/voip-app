@@ -80,7 +80,9 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
+dist/*
+!dist/styles.css
+!public/dist
 !public/dist/styles.css
 .output
 
