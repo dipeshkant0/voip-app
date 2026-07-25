@@ -173,7 +173,8 @@ const state = {
   incomingFiles: new Map(), // fileId -> { fileId, peerId, metadata, chunks, receivedSize }
   recording: false,
   roomPassword: '',
-  focusedPeerId: null
+  focusedPeerId: null,
+  autoDirectorEnabled: false
 };
 
 let mediaRecorder;
@@ -418,8 +419,10 @@ const ui = {
   midCallCameraSelect: document.getElementById('midCallCameraSelect'),
   videoFilterBtn: document.getElementById('videoFilterBtn'),
   whiteboardBtn: document.getElementById('whiteboardBtn'),
-  ccBtn: document.getElementById('ccBtn'),
   statsBtn: document.getElementById('statsBtn'),
+  reactionsToggleBtn: document.getElementById('reactionsToggleBtn'),
+  reactionMenu: document.getElementById('reactionMenu'),
+  directorBtn: document.getElementById('directorBtn'),
 };
 
 function supportsRequiredApis() {
@@ -739,11 +742,12 @@ function setupAudioAnalyser(stream, id) {
 
     const source = state.audioContext.createMediaStreamSource(stream);
     const analyser = state.audioContext.createAnalyser();
-    analyser.fftSize = 64; // 32 frequency bins
-    analyser.smoothingTimeConstant = 0.6;
+    analyser.fftSize = 256; // 128 frequency bins for precise acoustic spectrum resolution
+    analyser.smoothingTimeConstant = 0.6; // Smooth spectral decay to prevent stutter between words
     source.connect(analyser);
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    const timeData = new Float32Array(analyser.fftSize);
     const participantEl = document.getElementById(`participant-${id}`);
     const videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
 
@@ -756,10 +760,13 @@ function setupAudioAnalyser(stream, id) {
       source,
       stream,
       dataArray,
+      timeData,
       participantEl,
       videoWrapperEl,
       initTime: Date.now(),
       lastSpeakingTime: 0,
+      firstSpeakStart: 0,
+      canvasEl: null,
       speakingState: false
     });
 
@@ -800,37 +807,66 @@ function pollActiveSpeakers() {
     const isWarmedUp = (now - analyserData.initTime) > 400;
 
     if (isTrackLiveAndEnabled && isWarmedUp) {
-      const { analyser, dataArray } = analyserData;
-      analyser.getByteFrequencyData(dataArray);
+      const { analyser, dataArray, timeData } = analyserData;
 
-      // Filter out Bin 0 (0-750Hz DC offset & electrical/mic fan hum)
-      // Focus on vocal range bins 1 to 7 (~750 Hz - ~5600 Hz)
-      let voiceSum = 0;
-      let voiceBinsCount = 0;
-      let peak = 0;
-
-      for (let i = 1; i < Math.min(8, dataArray.length); i++) {
-        const val = dataArray[i];
-        voiceSum += val;
-        voiceBinsCount++;
-        if (val > peak) peak = val;
+      // Step 1: Compute lightweight Time-Domain RMS volume (Noise Gate)
+      let rms = 0;
+      if (timeData) {
+        analyser.getFloatTimeDomainData(timeData);
+        let sumSquares = 0;
+        const len = timeData.length;
+        for (let i = 0; i < len; i++) {
+          sumSquares += timeData[i] * timeData[i];
+        }
+        rms = Math.sqrt(sumSquares / len);
       }
 
-      const voiceAvg = voiceBinsCount > 0 ? (voiceSum / voiceBinsCount) : 0;
+      // Step 2: Early CPU Optimization - Only compute intensive FFT spectrum if RMS passes the conversational noise gate
+      if (!timeData || rms > 0.0025) {
+        analyser.getByteFrequencyData(dataArray);
+        let voiceSum = 0;
+        let voiceBinsCount = 0;
+        let peak = 0;
+        const binLen = dataArray.length;
 
-      // Genuine voice detection threshold:
-      rawSpeaking = voiceAvg > 20 && peak > 35;
+        // Filter out Bins 0-1 (low-frequency electrical rumble & DC offset)
+        for (let i = 2; i < binLen; i++) {
+          const val = dataArray[i];
+          voiceSum += val;
+          voiceBinsCount++;
+          if (val > peak) peak = val;
+        }
+
+        const voiceAvg = voiceBinsCount > 0 ? (voiceSum / voiceBinsCount) : 0;
+        // Natural speech threshold: gentle enough for normal & quiet talking, rigid enough against room silence
+        rawSpeaking = (rms > 0.0025 || !timeData) && peak > 60 && voiceAvg > 22;
+      } else {
+        rawSpeaking = false; // Silenced by RMS noise gate, saved 100% of FFT computation
+      }
     }
 
     if (rawSpeaking) {
       analyserData.lastSpeakingTime = now;
+      if (!analyserData.firstSpeakStart) {
+        analyserData.firstSpeakStart = now;
+      } else if (state.autoDirectorEnabled && id !== 'local' && (now - analyserData.firstSpeakStart >= 1500)) {
+        // AI Auto-Director: automatically transition focus to the active speaker after 1.5s continuous speech
+        if (state.focusedPeerId !== id && !state.screenSharing) {
+          focusVideo(id);
+          showToast(`🤖 AI Director: Focused on active speaker`, 'info', 2000);
+        }
+      }
+    } else {
+      analyserData.firstSpeakStart = 0;
     }
 
     if (!isTrackLiveAndEnabled) {
       analyserData.lastSpeakingTime = 0;
+      analyserData.firstSpeakStart = 0;
     }
 
-    const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || (now - analyserData.lastSpeakingTime < 400));
+    // 650ms hangover guarantees smooth continuous glow across natural speaking pauses between words
+    const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || (now - analyserData.lastSpeakingTime < 650));
 
     if (analyserData.speakingState !== shouldBeMarkedSpeaking) {
       analyserData.speakingState = shouldBeMarkedSpeaking;
@@ -839,7 +875,7 @@ function pollActiveSpeakers() {
         analyserData.participantEl = document.getElementById(`participant-${id}`);
       }
       if (!analyserData.videoWrapperEl || !analyserData.videoWrapperEl.isConnected) {
-        analyserData.videoWrapperEl = document.getElementById(`video-wrapper-${id}`);
+        analyserData.videoWrapperEl = document.getElementById(id === 'local' ? 'video-wrapper-local' : `video-wrapper-${id}`);
       }
 
       if (analyserData.participantEl) {
@@ -849,7 +885,65 @@ function pollActiveSpeakers() {
         analyserData.videoWrapperEl.classList.toggle('active-speaker', shouldBeMarkedSpeaking);
       }
     }
+
+    renderAudioVisiBar(id, analyserData, shouldBeMarkedSpeaking);
   });
+}
+
+const VISI_BAR_TABLE = Array.from({ length: 24 }, (_, i) => {
+  const angle = (i * 2 * Math.PI) / 24 - Math.PI / 2;
+  return { cos: Math.cos(angle), sin: Math.sin(angle), color: i % 2 === 0 ? '#00f0ff' : '#a3e635' };
+});
+
+function renderAudioVisiBar(id, analyserData, shouldBeMarkedSpeaking) {
+  if (!analyserData.videoWrapperEl || !analyserData.videoWrapperEl.isConnected) {
+    analyserData.videoWrapperEl = document.getElementById(id === 'local' ? 'video-wrapper-local' : `video-wrapper-${id}`);
+  }
+  const wrapper = analyserData.videoWrapperEl;
+  if (!wrapper) return;
+
+  if (!analyserData.canvasEl || !analyserData.canvasEl.isConnected || !analyserData.ctx) {
+    analyserData.canvasEl = wrapper.querySelector('.audio-visi-canvas');
+    analyserData.ctx = analyserData.canvasEl ? analyserData.canvasEl.getContext('2d') : null;
+  }
+  const canvas = analyserData.canvasEl;
+  const ctx = analyserData.ctx;
+  if (!canvas || !ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w / 2;
+  const cy = h / 2;
+
+  if (!shouldBeMarkedSpeaking) {
+    if (!canvas.dataset.cleared) {
+      ctx.clearRect(0, 0, w, h);
+      canvas.dataset.cleared = "true";
+    }
+    return;
+  }
+
+  delete canvas.dataset.cleared;
+  ctx.clearRect(0, 0, w, h);
+
+  const dataArray = analyserData.dataArray;
+  if (!dataArray) return;
+
+  const step = Math.floor((dataArray.length - 2) / 24) || 1;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+
+  for (let i = 0; i < 24; i++) {
+    const val = dataArray[i * step + 2] || 0;
+    const barHeight = Math.max(3, (val / 255) * 20);
+    const t = VISI_BAR_TABLE[i];
+
+    ctx.strokeStyle = t.color;
+    ctx.beginPath();
+    ctx.moveTo(cx + t.cos * 46, cy + t.sin * 46);
+    ctx.lineTo(cx + t.cos * (46 + barHeight), cy + t.sin * (46 + barHeight));
+    ctx.stroke();
+  }
 }
 
 function getAudioConstraints(deviceId = '', exactDevice = false) {
@@ -881,11 +975,276 @@ function rebuildLocalStream(audioTrack = currentTrack(), videoTrack = state.vide
   return nextStream;
 }
 
+// ==========================================
+// Threshold-Based Scrollable Overflow Reactive Grid Layout Engine
+// ==========================================
+function calculateOptimalGrid(n, boxWidth, boxHeight, aspectRatio = 16 / 9, gap = 12, minTileWidth = 0) {
+  if (n === 0) return { cols: 1, rows: 1, tileWidth: boxWidth, tileHeight: boxHeight, overflow: false };
+  
+  let bestCols = 1;
+  let bestRows = 1;
+  let maxArea = -1;
+  let bestWidth = 0;
+  let bestHeight = 0;
+
+  // Stage 1: Try to fit entirely inside visible container volume without scrollbars
+  for (let c = 1; c <= n; c++) {
+    const r = Math.ceil(n / c);
+    const totalGapW = (c - 1) * gap;
+    const totalGapH = (r - 1) * gap;
+    const maxTileW = Math.max(10, (boxWidth - totalGapW) / c);
+    const maxTileH = Math.max(10, (boxHeight - totalGapH) / r);
+
+    let tileW = maxTileW;
+    let tileH = tileW / aspectRatio;
+
+    if (tileH > maxTileH) {
+      tileH = maxTileH;
+      tileW = tileH * aspectRatio;
+    }
+
+    const area = tileW * tileH;
+    if (area > maxArea) {
+      maxArea = area;
+      bestCols = c;
+      bestRows = r;
+      bestWidth = tileW;
+      bestHeight = tileH;
+    }
+  }
+
+  // Stage 2: Threshold Activation - Gracefully transition to scrollable grid when frames would become unreadable
+  if (minTileWidth > 0 && n > 1 && bestWidth < minTileWidth && bestWidth < boxWidth) {
+    let cols = Math.floor((boxWidth + gap) / (minTileWidth + gap));
+    if (cols < 1) cols = 1;
+    if (cols > n) cols = n;
+
+    const totalGapW = (cols - 1) * gap;
+    const tileW = Math.max(10, (boxWidth - totalGapW) / cols);
+    const tileH = tileW / aspectRatio;
+    const rows = Math.ceil(n / cols);
+
+    return { cols, rows, tileWidth: tileW, tileHeight: tileH, overflow: true };
+  }
+
+  return { cols: bestCols, rows: bestRows, tileWidth: bestWidth, tileHeight: bestHeight, overflow: false };
+}
+
+// Diff-checking DOM helper to prevent browser layout thrashing & forced reflows
+function applyOptimizedTileStyle(el, x, y, width, height, zIndex) {
+  const nx = Math.round(x * 10) / 10;
+  const ny = Math.round(y * 10) / 10;
+  const nw = Math.round(width * 10) / 10;
+  const nh = Math.round(height * 10) / 10;
+
+  if (el._gx !== nx || el._gy !== ny || el._gw !== nw || el._gh !== nh || el._gz !== zIndex) {
+    el.style.left = `${nx}px`;
+    el.style.top = `${ny}px`;
+    el.style.width = `${nw}px`;
+    el.style.height = `${nh}px`;
+    if (el._gz !== zIndex) el.style.zIndex = `${zIndex}`;
+    
+    el._gx = nx;
+    el._gy = ny;
+    el._gw = nw;
+    el._gh = nh;
+    el._gz = zIndex;
+  }
+  return ny + nh;
+}
+
+let gridLayoutRafId = null;
+function scheduleVideoGridLayout() {
+  if (gridLayoutRafId) return;
+  gridLayoutRafId = requestAnimationFrame(() => {
+    gridLayoutRafId = null;
+    updateVideoGridLayout();
+  });
+}
+
+let cachedSpacerEl = null;
+
+function updateVideoGridLayout() {
+  const container = ui.videoContainer;
+  if (!container || !container.isConnected) return;
+
+  const wrappers = Array.from(container.children).filter(el => el.classList.contains('video-wrapper') && el.style.display !== 'none');
+  const count = wrappers.length;
+  if (count === 0) return;
+
+  const rect = container.getBoundingClientRect();
+  const gap = 12;
+  const pb = 80; // Space reserved at bottom of stage for audio/video control buttons
+  const availWidth = Math.max(100, rect.width - 24);
+  const availHeight = Math.max(100, rect.height - pb - 12);
+  const startX = 12;
+  const startY = 12;
+
+  const isMobile = window.innerWidth <= 640;
+  const normalMinThreshold = isMobile ? Math.min(availWidth, 240) : Math.min(availWidth, 280);
+
+  const focusedWrapper = state.focusedPeerId ? document.getElementById(`video-wrapper-${state.focusedPeerId}`) : null;
+  const isFocusMode = focusedWrapper && wrappers.includes(focusedWrapper);
+
+  let maxBottom = 0;
+
+  // NORMAL MODE (No focus, or single participant): Evenly distributed, threshold scroll enabled
+  if (!isFocusMode || count === 1) {
+    const grid = calculateOptimalGrid(count, availWidth, availHeight, 16 / 9, gap, normalMinThreshold);
+    const totalGridW = grid.cols * grid.tileWidth + (grid.cols - 1) * gap;
+    const totalGridH = grid.rows * grid.tileHeight + (grid.rows - 1) * gap;
+    const offsetX = startX + (availWidth - totalGridW) / 2;
+    const offsetY = (totalGridH > availHeight) ? startY : startY + (availHeight - totalGridH) / 2;
+
+    wrappers.forEach((el, idx) => {
+      const col = idx % grid.cols;
+      const row = Math.floor(idx / grid.cols);
+      
+      const itemsInRow = (row === grid.rows - 1) ? (count - row * grid.cols) : grid.cols;
+      const rowWidth = itemsInRow * grid.tileWidth + (itemsInRow - 1) * gap;
+      const rowOffsetX = startX + (availWidth - rowWidth) / 2;
+
+      const x = (row === grid.rows - 1 ? rowOffsetX : offsetX) + col * (grid.tileWidth + gap);
+      const y = offsetY + row * (grid.tileHeight + gap);
+
+      const bottom = applyOptimizedTileStyle(el, x, y, grid.tileWidth, grid.tileHeight, 1);
+      if (bottom > maxBottom) maxBottom = bottom;
+    });
+  } else {
+    // FOCUS MODE: Focused video occupies exactly 60% area, remaining 40% creates scrollable gallery strip
+    const isLandscape = availWidth >= availHeight;
+    const others = wrappers.filter(w => w !== focusedWrapper);
+
+    if (isLandscape) {
+      // Horizontal Split for Landscape Devices (Laptops, Tablets, Monitors)
+      const focusBoxW = (availWidth - gap) * 0.6;
+      const focusBoxH = availHeight;
+      
+      let fW = focusBoxW;
+      let fH = fW / (16 / 9);
+      if (fH > focusBoxH) {
+        fH = focusBoxH;
+        fW = fH * (16 / 9);
+      }
+      const fX = startX + (focusBoxW - fW) / 2;
+      const fY = startY + (focusBoxH - fH) / 2;
+
+      const fb = applyOptimizedTileStyle(focusedWrapper, fX, fY, fW, fH, 10);
+      if (fb > maxBottom) maxBottom = fb;
+
+      const stripBoxW = (availWidth - gap) * 0.4;
+      const stripBoxH = availHeight;
+      const stripStartX = startX + focusBoxW + gap;
+      const stripMinThreshold = Math.min(stripBoxW, 200);
+
+      const grid = calculateOptimalGrid(others.length, stripBoxW, stripBoxH, 16 / 9, gap, stripMinThreshold);
+      const totalGridW = grid.cols * grid.tileWidth + (grid.cols - 1) * gap;
+      const totalGridH = grid.rows * grid.tileHeight + (grid.rows - 1) * gap;
+      const offsetX = stripStartX + (stripBoxW - totalGridW) / 2;
+      const offsetY = (totalGridH > stripBoxH) ? startY : startY + (stripBoxH - totalGridH) / 2;
+
+      others.forEach((el, idx) => {
+        const col = idx % grid.cols;
+        const row = Math.floor(idx / grid.cols);
+        
+        const itemsInRow = (row === grid.rows - 1) ? (others.length - row * grid.cols) : grid.cols;
+        const rowWidth = itemsInRow * grid.tileWidth + (itemsInRow - 1) * gap;
+        const rowOffsetX = stripStartX + (stripBoxW - rowWidth) / 2;
+
+        const x = (row === grid.rows - 1 ? rowOffsetX : offsetX) + col * (grid.tileWidth + gap);
+        const y = offsetY + row * (grid.tileHeight + gap);
+
+        const ob = applyOptimizedTileStyle(el, x, y, grid.tileWidth, grid.tileHeight, 5);
+        if (ob > maxBottom) maxBottom = ob;
+      });
+    } else {
+      // Vertical Split for Portrait Devices (Mobile Phones, Portrait Tablets)
+      const focusBoxW = availWidth;
+      const focusBoxH = (availHeight - gap) * 0.6;
+
+      let fW = focusBoxW;
+      let fH = fW / (16 / 9);
+      if (fH > focusBoxH) {
+        fH = focusBoxH;
+        fW = fH * (16 / 9);
+      }
+      const fX = startX + (focusBoxW - fW) / 2;
+      const fY = startY + (focusBoxH - fH) / 2;
+
+      const fb = applyOptimizedTileStyle(focusedWrapper, fX, fY, fW, fH, 10);
+      if (fb > maxBottom) maxBottom = fb;
+
+      const stripBoxW = availWidth;
+      const stripBoxH = (availHeight - gap) * 0.4;
+      const stripStartY = startY + focusBoxH + gap;
+      const stripMinThreshold = Math.min(stripBoxW, 220);
+
+      const grid = calculateOptimalGrid(others.length, stripBoxW, stripBoxH, 16 / 9, gap, stripMinThreshold);
+      const totalGridW = grid.cols * grid.tileWidth + (grid.cols - 1) * gap;
+      const totalGridH = grid.rows * grid.tileHeight + (grid.rows - 1) * gap;
+      const offsetX = startX + (stripBoxW - totalGridW) / 2;
+      const offsetY = (totalGridH > stripBoxH) ? stripStartY : stripStartY + (stripBoxH - totalGridH) / 2;
+
+      others.forEach((el, idx) => {
+        const col = idx % grid.cols;
+        const row = Math.floor(idx / grid.cols);
+        
+        const itemsInRow = (row === grid.rows - 1) ? (others.length - row * grid.cols) : grid.cols;
+        const rowWidth = itemsInRow * grid.tileWidth + (itemsInRow - 1) * gap;
+        const rowOffsetX = startX + (stripBoxW - rowWidth) / 2;
+
+        const x = (row === grid.rows - 1 ? rowOffsetX : offsetX) + col * (grid.tileWidth + gap);
+        const y = offsetY + row * (grid.tileHeight + gap);
+
+        const ob = applyOptimizedTileStyle(el, x, y, grid.tileWidth, grid.tileHeight, 5);
+        if (ob > maxBottom) maxBottom = ob;
+      });
+    }
+  }
+
+  // Update dynamic scroll sentinel so container generates fluid vertical scrollbars when items overflow
+  if (!cachedSpacerEl || !cachedSpacerEl.isConnected) {
+    cachedSpacerEl = document.getElementById('video-grid-spacer');
+    if (!cachedSpacerEl) {
+      cachedSpacerEl = document.createElement('div');
+      cachedSpacerEl.id = 'video-grid-spacer';
+      cachedSpacerEl.style.position = 'absolute';
+      cachedSpacerEl.style.width = '1px';
+      cachedSpacerEl.style.pointerEvents = 'none';
+      cachedSpacerEl.style.visibility = 'hidden';
+      ui.videoContainer.appendChild(cachedSpacerEl);
+    }
+  }
+  applyOptimizedTileStyle(cachedSpacerEl, 0, Math.max(rect.height, maxBottom + 24), 1, 1, -1);
+}
+
+let videoGridInitialized = false;
+function initVideoGridEngine() {
+  if (videoGridInitialized || !ui.videoContainer) return;
+  videoGridInitialized = true;
+  
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => scheduleVideoGridLayout()).observe(ui.videoContainer);
+  } else {
+    window.addEventListener('resize', scheduleVideoGridLayout, { passive: true });
+  }
+  
+  new MutationObserver(() => scheduleVideoGridLayout()).observe(ui.videoContainer, {
+    childList: true
+  });
+  
+  window.addEventListener('orientationchange', () => {
+    setTimeout(scheduleVideoGridLayout, 50);
+    setTimeout(scheduleVideoGridLayout, 350);
+  }, { passive: true });
+}
+
 function unfocusVideo() {
   if (state.focusedPeerId) {
     const wrapper = document.getElementById(`video-wrapper-${state.focusedPeerId}`);
     if (wrapper) wrapper.classList.remove('focused');
     state.focusedPeerId = null;
+    scheduleVideoGridLayout();
   }
 }
 
@@ -899,90 +1258,137 @@ function focusVideo(peerId) {
   if (wrapper) {
     wrapper.classList.add('focused');
     state.focusedPeerId = peerId;
+    scheduleVideoGridLayout();
   }
+}
+
+function buildVideoTile(wrapperId, videoId, username, isLocal, focusTargetId) {
+  let wrapper = document.getElementById(wrapperId);
+  if (wrapper) return wrapper;
+
+  wrapper = document.createElement('div');
+  wrapper.className = 'video-wrapper';
+  wrapper.id = wrapperId;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar-placeholder';
+  avatar.textContent = username.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  avatar.style.position = 'absolute';
+  avatar.style.color = 'white';
+  avatar.style.fontSize = '2rem';
+
+  const muteIcon = document.createElement('div');
+  muteIcon.className = 'video-mute-icon hidden';
+  muteIcon.id = isLocal ? 'mute-icon-local' : `mute-icon-${focusTargetId}`;
+  if (!isLocal) {
+    muteIcon.style.color = 'var(--danger)';
+    muteIcon.style.fontWeight = 'bold';
+    muteIcon.style.background = 'rgba(0,0,0,0.6)';
+    muteIcon.style.padding = '4px';
+    muteIcon.style.borderRadius = '50%';
+  }
+  muteIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path>${isLocal ? '' : '<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line>'}</svg>`;
+
+  const nametag = document.createElement('div');
+  nametag.className = 'video-nametag';
+  if (!isLocal) nametag.id = `nametag-${focusTargetId}`;
+  nametag.textContent = isLocal ? (state.username || 'You (Local)') : username;
+
+  const unpinBtn = document.createElement('div');
+  unpinBtn.className = 'unpin-btn';
+  unpinBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+  unpinBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    unfocusVideo();
+  });
+
+  const fsBtn = document.createElement('div');
+  fsBtn.className = 'fullscreen-btn';
+  fsBtn.title = 'Fullscreen';
+  fsBtn.innerHTML = `
+    <svg class="fs-expand" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+    <svg class="fs-compress" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>
+  `;
+  fsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const videoEl = document.getElementById(videoId);
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      if (wrapper.requestFullscreen) {
+        wrapper.requestFullscreen().catch(err => console.warn('Fullscreen denied:', err));
+      } else if (videoEl && videoEl.webkitEnterFullscreen) {
+        videoEl.webkitEnterFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    }
+  });
+
+  const visiCanvas = document.createElement('canvas');
+  visiCanvas.className = 'audio-visi-canvas';
+  visiCanvas.width = 140;
+  visiCanvas.height = 140;
+
+  const pipBtn = document.createElement('div');
+  pipBtn.className = 'pip-btn';
+  pipBtn.title = 'Picture-in-Picture';
+  pipBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 19H5V5h7V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"></path></svg>`;
+  pipBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const videoEl = document.getElementById(videoId);
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (videoEl && videoEl.requestPictureInPicture && videoEl.srcObject) {
+        await videoEl.requestPictureInPicture();
+      } else {
+        showToast('PiP requires an active video track', 'info', 2500);
+      }
+    } catch (err) {
+      console.warn('PiP failed:', err);
+    }
+  });
+
+  const hudBadge = document.createElement('div');
+  hudBadge.className = 'latency-badge';
+  hudBadge.id = isLocal ? 'hud-badge-local' : `hud-badge-${focusTargetId}`;
+  hudBadge.innerHTML = `<span class="optic-dot"></span><span class="hud-text">${isLocal ? 'Local (0ms)' : 'Active'}</span>`;
+
+  wrapper.addEventListener('click', () => {
+    focusVideo(focusTargetId);
+  });
+
+  if (isLocal) {
+    const localVideoEl = document.createElement('video');
+    localVideoEl.id = videoId;
+    localVideoEl.autoplay = true;
+    localVideoEl.playsInline = true;
+    localVideoEl.muted = true;
+    wrapper.appendChild(localVideoEl);
+  }
+
+  wrapper.appendChild(avatar);
+  wrapper.appendChild(visiCanvas);
+  wrapper.appendChild(muteIcon);
+  wrapper.appendChild(nametag);
+  wrapper.appendChild(hudBadge);
+  wrapper.appendChild(unpinBtn);
+  wrapper.appendChild(pipBtn);
+  wrapper.appendChild(fsBtn);
+  ui.videoContainer.appendChild(wrapper);
+
+  return wrapper;
 }
 
 function updateLocalVideoPreview() {
   const videoTrack = state.screenSharing ? state.localVideoTrack : (state.videoEnabled ? currentVideoTrack() : null);
-  let localVideoEl = document.getElementById('video-local');
-  let wrapper = document.getElementById('video-wrapper-local');
-
-  if (!wrapper) {
-    wrapper = document.createElement('div');
-    wrapper.className = 'video-wrapper';
-    wrapper.id = 'video-wrapper-local';
-
-    localVideoEl = document.createElement('video');
-    localVideoEl.id = 'video-local';
-    localVideoEl.autoplay = true;
-    localVideoEl.playsInline = true;
-    localVideoEl.muted = true;
-
-    const muteIcon = document.createElement('div');
-    muteIcon.className = 'video-mute-icon hidden';
-    muteIcon.id = 'mute-icon-local';
-    muteIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path></svg>`;
-
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar-placeholder';
-    const nameStr = state.username || 'You';
-    avatar.textContent = nameStr.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-    avatar.style.position = 'absolute';
-    avatar.style.color = 'white';
-    avatar.style.fontSize = '2rem';
-
-    const nametag = document.createElement('div');
-    nametag.className = 'video-nametag';
-    nametag.textContent = state.username || 'You (Local)';
-
-    const unpinBtn = document.createElement('div');
-    unpinBtn.className = 'unpin-btn';
-    unpinBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-    unpinBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      unfocusVideo();
-    });
-
-    // Create the Fullscreen Button
-    const fsBtn = document.createElement('div');
-    fsBtn.className = 'fullscreen-btn';
-    fsBtn.title = 'Fullscreen';
-    fsBtn.innerHTML = `
-      <svg class="fs-expand" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
-      <svg class="fs-compress" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>
-    `;
-    fsBtn.addEventListener('click', (e) => {
-      e.stopPropagation(); // Stops the click from also triggering "Focus Mode"
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        if (wrapper.requestFullscreen) {
-          wrapper.requestFullscreen().catch(err => console.warn('Fullscreen denied:', err));
-        } else if (localVideoEl && localVideoEl.webkitEnterFullscreen) {
-          localVideoEl.webkitEnterFullscreen();
-        }
-      } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-          document.webkitExitFullscreen();
-        }
-      }
-    });
-
-    // MODE 2 Trigger: Clicking the card itself
-    wrapper.addEventListener('click', () => {
-      focusVideo('local');
-    });
-
-    wrapper.appendChild(localVideoEl);
-    wrapper.appendChild(muteIcon);
-    wrapper.appendChild(avatar);
-    wrapper.appendChild(nametag);
-    wrapper.appendChild(unpinBtn);
-    wrapper.appendChild(fsBtn);
-    ui.videoContainer.appendChild(wrapper);
-  }
-
+  const wrapper = buildVideoTile('video-wrapper-local', 'video-local', state.username || 'You', true, 'local');
+  const localVideoEl = document.getElementById('video-local');
   const avatarPlaceholder = wrapper.querySelector('.avatar-placeholder');
+  const visiCanvasEl = wrapper.querySelector('.audio-visi-canvas');
 
   if (state.screenSharing) {
     localVideoEl.style.transform = 'none';
@@ -994,11 +1400,13 @@ function updateLocalVideoPreview() {
     localVideoEl.srcObject = null;
     localVideoEl.style.display = 'none';
     if (avatarPlaceholder) avatarPlaceholder.style.display = 'block';
+    if (visiCanvasEl) visiCanvasEl.style.display = 'block';
     return;
   }
 
   localVideoEl.style.display = 'block';
   if (avatarPlaceholder) avatarPlaceholder.style.display = 'none';
+  if (visiCanvasEl) visiCanvasEl.style.display = 'none';
   localVideoEl.srcObject = new MediaStream([videoTrack]);
   localVideoEl.play().catch(e => console.warn('Local video auto-play prevented:', e));
 }
@@ -1389,6 +1797,8 @@ function attachDataChannel(peerId, channel) {
           whiteboard.handleIncomingCompileResult(msg);
         } else if (msg.type === 'caption') {
           captions.displayCaption(msg.username || 'Peer', msg.text);
+        } else if (msg.type === 'reaction') {
+          triggerFloatingReaction(peerId, msg.emoji);
         } else if (msg.type === 'file-meta') {
           const fileName = String(msg.name || 'received-file').slice(0, 120);
           const fileSize = Number(msg.size);
@@ -1456,80 +1866,7 @@ function queueSignalingTask(peerId, task) {
 
 
 function ensurePeerVideoWrapper(peerId, username = 'Peer') {
-  let wrapper = document.getElementById(`video-wrapper-${peerId}`);
-  if (!wrapper) {
-    wrapper = document.createElement('div');
-    wrapper.className = 'video-wrapper';
-    wrapper.id = `video-wrapper-${peerId}`;
-
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar-placeholder';
-    avatar.textContent = username.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-    avatar.style.position = 'absolute';
-    avatar.style.color = 'white';
-    avatar.style.fontSize = '2rem';
-
-    const muteIcon = document.createElement('div');
-    muteIcon.className = 'video-mute-icon hidden';
-    muteIcon.id = `mute-icon-${peerId}`;
-    muteIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>';
-    muteIcon.style.color = 'var(--danger)';
-    muteIcon.style.fontWeight = 'bold';
-    muteIcon.style.background = 'rgba(0,0,0,0.6)';
-    muteIcon.style.padding = '4px';
-    muteIcon.style.borderRadius = '50%';
-
-    const nametag = document.createElement('div');
-    nametag.className = 'video-nametag';
-    nametag.id = `nametag-${peerId}`;
-    nametag.textContent = username;
-
-    const unpinBtn = document.createElement('div');
-    unpinBtn.className = 'unpin-btn';
-    unpinBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-    unpinBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      unfocusVideo();
-    });
-
-    // Create the Fullscreen Button
-    const fsBtn = document.createElement('div');
-    fsBtn.className = 'fullscreen-btn';
-    fsBtn.title = 'Fullscreen';
-    fsBtn.innerHTML = `
-      <svg class="fs-expand" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
-      <svg class="fs-compress" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>
-    `;
-    fsBtn.addEventListener('click', (e) => {
-      e.stopPropagation(); // Stops the click from also triggering "Focus Mode"
-      const videoEl = document.getElementById(`video-${peerId}`);
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        if (wrapper.requestFullscreen) {
-          wrapper.requestFullscreen().catch(err => console.warn('Fullscreen denied:', err));
-        } else if (videoEl && videoEl.webkitEnterFullscreen) {
-          videoEl.webkitEnterFullscreen();
-        }
-      } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-          document.webkitExitFullscreen();
-        }
-      }
-    });
-
-    // MODE 2 Trigger: Clicking the card itself
-    wrapper.addEventListener('click', () => {
-      focusVideo(peerId);
-    });
-
-    wrapper.appendChild(avatar);
-    wrapper.appendChild(muteIcon);
-    wrapper.appendChild(nametag);
-    wrapper.appendChild(unpinBtn);
-    wrapper.appendChild(fsBtn);
-    ui.videoContainer.appendChild(wrapper);
-  }
+  buildVideoTile(`video-wrapper-${peerId}`, `video-${peerId}`, username, false, peerId);
 }
 
 function ensurePeer(peerId, providedUsername = null) {
@@ -1570,10 +1907,6 @@ function ensurePeer(peerId, providedUsername = null) {
   renderParticipants();
 
   const pc = peer.pc;
-  // const localTrack = currentTrack();
-  // if (localTrack && state.localStream) {
-  //   pc.addTrack(localTrack, state.localStream);
-  // }
 
   pc.onicecandidate = (event) => {
     if (!event.candidate || !state.roomId) return;
@@ -1598,16 +1931,28 @@ function ensurePeer(peerId, providedUsername = null) {
         videoEl.style.transition = 'opacity 0.2s ease';
         wrapper.appendChild(videoEl);
         const avatar = wrapper.querySelector('.avatar-placeholder');
+        const visiCanvas = wrapper.querySelector('.audio-visi-canvas');
         if (avatar) avatar.style.display = 'none';
+        if (visiCanvas) visiCanvas.style.display = 'none';
       }
       videoEl.srcObject = new MediaStream([event.track]);
       videoEl.play().catch(e => console.warn('Video auto-play prevented:', e));
 
       event.track.onmute = () => {
         videoEl.style.opacity = '0';
+        const wrapper = document.getElementById(`video-wrapper-${peerId}`);
+        if (wrapper) {
+          const vCanvas = wrapper.querySelector('.audio-visi-canvas');
+          if (vCanvas) vCanvas.style.display = 'block';
+        }
       };
       event.track.onunmute = () => {
         videoEl.style.opacity = '1';
+        const wrapper = document.getElementById(`video-wrapper-${peerId}`);
+        if (wrapper) {
+          const vCanvas = wrapper.querySelector('.audio-visi-canvas');
+          if (vCanvas) vCanvas.style.display = 'none';
+        }
       };
 
     } else {
@@ -3027,12 +3372,15 @@ function handleMediaStateChange(data) {
     const wrapper = document.getElementById(`video-wrapper-${peerId}`);
     if (videoEl && wrapper) {
       const avatar = wrapper.querySelector('.avatar-placeholder');
+      const visiCanvas = wrapper.querySelector('.audio-visi-canvas');
       if (data.enabled) {
         videoEl.style.opacity = '1';
         if (avatar) avatar.style.display = 'none';
+        if (visiCanvas) visiCanvas.style.display = 'none';
       } else {
         videoEl.style.opacity = '0';
         if (avatar) avatar.style.display = 'block';
+        if (visiCanvas) visiCanvas.style.display = 'block';
       }
     }
   }
@@ -3059,6 +3407,7 @@ socket.on('typing', (data) => {
   }, 3000);
 });
 
+initVideoGridEngine();
 ui.joinBtn.addEventListener('click', joinRoom);
 if (ui.generateLinkBtn) {
   ui.generateLinkBtn.addEventListener('click', (e) => {
@@ -3086,6 +3435,123 @@ ui.retryMicBtn.addEventListener('click', retryMicAccess);
 ui.copyLinkBtn.addEventListener('click', copyInviteLink);
 ui.sendBtn.addEventListener('click', sendChatMessage);
 ui.attachFileBtn.addEventListener('click', () => ui.fileInput.click());
+
+if (ui.directorBtn) {
+  ui.directorBtn.addEventListener('click', () => {
+    state.autoDirectorEnabled = !state.autoDirectorEnabled;
+    ui.directorBtn.classList.toggle('active', state.autoDirectorEnabled);
+    showToast(
+      state.autoDirectorEnabled ? '🤖 AI Auto-Director ENABLED (Auto-focusing active speakers)' : '🤖 AI Auto-Director DISABLED',
+      state.autoDirectorEnabled ? 'success' : 'info'
+    );
+  });
+}
+
+if (ui.reactionsToggleBtn && ui.reactionMenu) {
+  ui.reactionsToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    ui.reactionMenu.classList.toggle('hidden');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (ui.reactionMenu && !ui.reactionMenu.contains(e.target) && e.target !== ui.reactionsToggleBtn) {
+      ui.reactionMenu.classList.add('hidden');
+    }
+  });
+
+  ui.reactionMenu.querySelectorAll('.emoji-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const emoji = e.currentTarget.dataset.emoji || e.currentTarget.textContent.trim();
+      triggerFloatingReaction('local', emoji);
+      broadcastDataChannelMessage({ type: 'reaction', emoji });
+      ui.reactionMenu.classList.add('hidden');
+    });
+  });
+}
+
+function triggerFloatingReaction(targetId, emoji) {
+  const wrapper = document.getElementById(targetId === 'local' ? 'video-wrapper-local' : `video-wrapper-${targetId}`);
+  if (!wrapper) return;
+
+  const el = document.createElement('div');
+  el.className = 'floating-reaction-emoji';
+  el.textContent = emoji;
+  const randX = Math.floor(Math.random() * 60) + 20;
+  el.style.left = `${randX}%`;
+  el.style.bottom = `45px`;
+  wrapper.appendChild(el);
+
+  setTimeout(() => {
+    if (el && el.parentElement) {
+      el.remove();
+    }
+  }, 1800);
+}
+
+// Smart Eco-Bandwidth & Telemetry HUD Engine
+setInterval(() => {
+  if (state.peers.size === 0) return;
+
+  state.peers.forEach(async (peer, peerId) => {
+    if (!peer.pc || peer.pc.connectionState !== 'connected') return;
+
+    try {
+      const stats = await peer.pc.getStats();
+      let rtt = 0;
+
+      stats.forEach((stat) => {
+        if (stat.type === 'candidate-pair' && stat.state === 'succeeded') {
+          if (stat.currentRoundTripTime !== undefined) {
+            rtt = Math.round(stat.currentRoundTripTime * 1000);
+          }
+        }
+      });
+
+      // Update real-time HUD Badge with zero DOM query overhead
+      if (!peer.hudTextEl || !peer.hudTextEl.isConnected || !peer.hudDotEl || !peer.hudDotEl.isConnected) {
+        const hudEl = document.getElementById(`hud-badge-${peerId}`);
+        if (hudEl) {
+          peer.hudTextEl = hudEl.querySelector('.hud-text') || hudEl.querySelector('span:last-child');
+          peer.hudDotEl = hudEl.querySelector('.optic-dot');
+        }
+      }
+
+      if (peer.hudTextEl) {
+        peer.hudTextEl.textContent = rtt > 0 ? `${rtt}ms` : 'Active';
+      }
+      if (peer.hudDotEl) {
+        peer.hudDotEl.className = 'optic-dot' + (rtt > 250 ? ' bad' : rtt > 120 ? ' warn' : '');
+      }
+
+      // Smart Eco-Bandwidth Dynamic Simulcast Adaptation
+      const videoSender = peer.pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (videoSender && typeof videoSender.getParameters === 'function') {
+        const params = videoSender.getParameters();
+        if (params && params.encodings && params.encodings.length > 0) {
+          const encoding = params.encodings[0];
+          const shouldBeEco = (rtt > 220) || (state.peers.size >= 4);
+
+          if (shouldBeEco && !peer.isEcoMode) {
+            peer.isEcoMode = true;
+            encoding.maxBitrate = 280000;
+            encoding.scaleResolutionDownBy = 2;
+            videoSender.setParameters(params).catch(() => {});
+            showToast(`🌱 Eco-Bandwidth: Auto-adapted video stream for ${peer.username} to prevent lag`, 'warning', 3000);
+          } else if (!shouldBeEco && peer.isEcoMode && rtt < 150) {
+            peer.isEcoMode = false;
+            delete encoding.maxBitrate;
+            encoding.scaleResolutionDownBy = 1;
+            videoSender.setParameters(params).catch(() => {});
+            showToast(`⚡ High-Performance Mode restored for ${peer.username}`, 'success', 2500);
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore transient stats fetching glitches
+    }
+  });
+}, 2500);
+
 function sendFileToPeer(peerId, file, fileId, callbacks) {
   const peer = getPeerState(peerId);
   if (!peer || !peer.dataChannel || peer.dataChannel.readyState !== 'open') {
