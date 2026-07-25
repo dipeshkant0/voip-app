@@ -4193,7 +4193,7 @@ echo "Hello, World!"`
     const hudBadge = document.createElement("div");
     hudBadge.className = "latency-badge";
     hudBadge.id = isLocal ? "hud-badge-local" : `hud-badge-${focusTargetId}`;
-    hudBadge.innerHTML = `<span class="optic-dot"></span><span class="hud-text">${isLocal ? "Local (0ms)" : "Active"}</span>`;
+    hudBadge.innerHTML = `<span class="optic-dot"></span><span class="hud-text">${isLocal ? "\u26A1 You (Local)" : "\u{1F4F6} Connecting..."}</span>`;
     wrapper.addEventListener("click", () => {
       focusVideo(focusTargetId);
     });
@@ -6064,10 +6064,15 @@ echo "Hello, World!"`
         const stats = await peer.pc.getStats();
         let rtt = 0;
         stats.forEach((stat) => {
-          if (stat.type === "candidate-pair" && stat.state === "succeeded") {
+          if (stat.type === "candidate-pair" && (stat.state === "succeeded" || stat.selected || stat.nominated)) {
             if (stat.currentRoundTripTime !== void 0) {
               rtt = Math.round(stat.currentRoundTripTime * 1e3);
+            } else if (stat.roundTripTime !== void 0) {
+              rtt = Math.round(stat.roundTripTime * 1e3);
             }
+          }
+          if ((stat.type === "remote-inbound-rtp" || stat.type === "remote-outbound-rtp") && stat.roundTripTime !== void 0 && rtt === 0) {
+            rtt = Math.round(stat.roundTripTime * 1e3);
           }
         });
         if (!peer.hudTextEl || !peer.hudTextEl.isConnected || !peer.hudDotEl || !peer.hudDotEl.isConnected) {
@@ -6078,7 +6083,7 @@ echo "Hello, World!"`
           }
         }
         if (peer.hudTextEl) {
-          peer.hudTextEl.textContent = rtt > 0 ? `${rtt}ms` : "Active";
+          peer.hudTextEl.textContent = rtt > 0 ? `\u{1F4F6} ${rtt}ms RTT` : "\u{1F7E2} Connected";
         }
         if (peer.hudDotEl) {
           peer.hudDotEl.className = "optic-dot" + (rtt > 250 ? " bad" : rtt > 120 ? " warn" : "");
