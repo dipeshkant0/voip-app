@@ -1342,13 +1342,21 @@ function buildVideoTile(wrapperId, videoId, username, isLocal, focusTargetId) {
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
-      } else if (videoEl && videoEl.requestPictureInPicture && videoEl.srcObject) {
-        await videoEl.requestPictureInPicture();
+      } else if (videoEl && videoEl.srcObject && videoEl.srcObject.getVideoTracks().length > 0) {
+        if (videoEl.paused) {
+          await videoEl.play().catch(() => {});
+        }
+        if (videoEl.requestPictureInPicture) {
+          await videoEl.requestPictureInPicture();
+        } else {
+          showToast('PiP is not supported on this device/browser', 'warning', 3000);
+        }
       } else {
         showToast('PiP requires an active video track', 'info', 2500);
       }
     } catch (err) {
       console.warn('PiP failed:', err);
+      showToast('PiP failed: ' + (err.message || 'Video track not ready'), 'error', 3000);
     }
   });
 
@@ -1929,7 +1937,7 @@ function ensurePeer(peerId, providedUsername = null) {
         videoEl.playsInline = true;
         videoEl.muted = true;
         videoEl.style.transition = 'opacity 0.2s ease';
-        wrapper.appendChild(videoEl);
+        wrapper.insertBefore(videoEl, wrapper.firstChild);
         const avatar = wrapper.querySelector('.avatar-placeholder');
         const visiCanvas = wrapper.querySelector('.audio-visi-canvas');
         if (avatar) avatar.style.display = 'none';
@@ -3450,12 +3458,12 @@ if (ui.directorBtn) {
 if (ui.reactionsToggleBtn && ui.reactionMenu) {
   ui.reactionsToggleBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    ui.reactionMenu.classList.toggle('hidden');
+    ui.reactionMenu.classList.toggle('open');
   });
 
   document.addEventListener('click', (e) => {
     if (ui.reactionMenu && !ui.reactionMenu.contains(e.target) && e.target !== ui.reactionsToggleBtn) {
-      ui.reactionMenu.classList.add('hidden');
+      ui.reactionMenu.classList.remove('open');
     }
   });
 
@@ -3464,7 +3472,7 @@ if (ui.reactionsToggleBtn && ui.reactionMenu) {
       const emoji = e.currentTarget.dataset.emoji || e.currentTarget.textContent.trim();
       triggerFloatingReaction('local', emoji);
       broadcastDataChannelMessage({ type: 'reaction', emoji });
-      ui.reactionMenu.classList.add('hidden');
+      ui.reactionMenu.classList.remove('open');
     });
   });
 }
@@ -3474,18 +3482,19 @@ function triggerFloatingReaction(targetId, emoji) {
   if (!wrapper) return;
 
   const el = document.createElement('div');
-  el.className = 'floating-reaction-emoji';
+  el.className = 'reaction-particle';
   el.textContent = emoji;
-  const randX = Math.floor(Math.random() * 60) + 20;
-  el.style.left = `${randX}%`;
-  el.style.bottom = `45px`;
+  const drift = Math.floor((Math.random() - 0.5) * 80);
+  const rot = Math.floor((Math.random() - 0.5) * 40);
+  el.style.setProperty('--drift', `${drift}px`);
+  el.style.setProperty('--rot', `${rot}deg`);
   wrapper.appendChild(el);
 
   setTimeout(() => {
     if (el && el.parentElement) {
       el.remove();
     }
-  }, 1800);
+  }, 2200);
 }
 
 // Smart Eco-Bandwidth & Telemetry HUD Engine
