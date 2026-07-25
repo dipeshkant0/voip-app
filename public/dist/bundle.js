@@ -3763,47 +3763,59 @@ echo "Hello, World!"`
           analyser.getFloatTimeDomainData(timeData);
           let sumSquares = 0;
           const len = timeData.length;
-          for (let i = 0; i < len; i++) {
+          for (let i = 0; i < len; i += 2) {
             sumSquares += timeData[i] * timeData[i];
           }
-          rms = Math.sqrt(sumSquares / len);
+          rms = Math.sqrt(sumSquares * 2 / len);
         }
-        if (!timeData || rms > 25e-4) {
+        if (!timeData || rms > 15e-4) {
           analyser.getByteFrequencyData(dataArray);
           let voiceSum = 0;
           let voiceBinsCount = 0;
           let peak = 0;
-          const binLen = dataArray.length;
-          for (let i = 2; i < binLen; i++) {
+          const maxBin = Math.min(dataArray.length, 64);
+          for (let i = 2; i < maxBin; i++) {
             const val = dataArray[i];
             voiceSum += val;
             voiceBinsCount++;
             if (val > peak) peak = val;
           }
           const voiceAvg = voiceBinsCount > 0 ? voiceSum / voiceBinsCount : 0;
-          rawSpeaking = (rms > 25e-4 || !timeData) && peak > 60 && voiceAvg > 22;
+          rawSpeaking = (rms > 15e-4 || !timeData) && peak > 35 && voiceAvg > 14;
         } else {
           rawSpeaking = false;
         }
       }
       if (rawSpeaking) {
         analyserData.lastSpeakingTime = now;
+      }
+      if (!isTrackLiveAndEnabled) {
+        analyserData.lastSpeakingTime = 0;
+      }
+      const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || now - analyserData.lastSpeakingTime < 750);
+      if (shouldBeMarkedSpeaking) {
         if (!analyserData.firstSpeakStart) {
           analyserData.firstSpeakStart = now;
-        } else if (state.autoDirectorEnabled && id !== "local" && now - analyserData.firstSpeakStart >= 1500) {
-          if (state.focusedPeerId !== id && !state.screenSharing) {
-            focusVideo(id);
-            showToast(`\u{1F916} AI Director: Focused on active speaker`, "info", 2e3);
+        } else if (state.autoDirectorEnabled && !state.screenSharing) {
+          const speakDuration = now - analyserData.firstSpeakStart;
+          if (id !== "local" && speakDuration >= 600) {
+            if (state.focusedPeerId !== id) {
+              focusVideo(id);
+              if (typeof window.showToast === "function") {
+                const peerName = state.peers.get(id)?.username || "Peer";
+                window.showToast(`\u{1F916} AI Director: Focused on active speaker (${peerName})`, "info", 2e3);
+              }
+            }
+          } else if (id === "local" && speakDuration >= 1200 && state.focusedPeerId && state.focusedPeerId !== "local") {
+            unfocusVideo();
+            if (typeof window.showToast === "function") {
+              window.showToast(`\u{1F916} AI Director: Returning to group grid view as you speak`, "info", 2e3);
+            }
           }
         }
       } else {
         analyserData.firstSpeakStart = 0;
       }
-      if (!isTrackLiveAndEnabled) {
-        analyserData.lastSpeakingTime = 0;
-        analyserData.firstSpeakStart = 0;
-      }
-      const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || now - analyserData.lastSpeakingTime < 650);
       if (analyserData.speakingState !== shouldBeMarkedSpeaking) {
         analyserData.speakingState = shouldBeMarkedSpeaking;
         if (!analyserData.participantEl || !analyserData.participantEl.isConnected) {

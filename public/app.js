@@ -809,28 +809,27 @@ function pollActiveSpeakers() {
     if (isTrackLiveAndEnabled && isWarmedUp) {
       const { analyser, dataArray, timeData } = analyserData;
 
-      // Step 1: Compute lightweight Time-Domain RMS volume (Noise Gate)
+      // Step 1: Compute lightweight Time-Domain RMS volume (Noise Gate) with 2x sample stepping optimization
       let rms = 0;
       if (timeData) {
         analyser.getFloatTimeDomainData(timeData);
         let sumSquares = 0;
         const len = timeData.length;
-        for (let i = 0; i < len; i++) {
+        for (let i = 0; i < len; i += 2) {
           sumSquares += timeData[i] * timeData[i];
         }
-        rms = Math.sqrt(sumSquares / len);
+        rms = Math.sqrt((sumSquares * 2) / len);
       }
 
-      // Step 2: Early CPU Optimization - Only compute intensive FFT spectrum if RMS passes the conversational noise gate
-      if (!timeData || rms > 0.0025) {
+      // Step 2: Early CPU Optimization - Only compute FFT voice spectrum if RMS passes the conversational noise gate
+      if (!timeData || rms > 0.0015) {
         analyser.getByteFrequencyData(dataArray);
         let voiceSum = 0;
         let voiceBinsCount = 0;
         let peak = 0;
-        const binLen = dataArray.length;
+        const maxBin = Math.min(dataArray.length, 64); // Focus strictly on human vocal frequency envelope (~150Hz - 5.5kHz)
 
-        // Filter out Bins 0-1 (low-frequency electrical rumble & DC offset)
-        for (let i = 2; i < binLen; i++) {
+        for (let i = 2; i < maxBin; i++) {
           const val = dataArray[i];
           voiceSum += val;
           voiceBinsCount++;
@@ -838,8 +837,8 @@ function pollActiveSpeakers() {
         }
 
         const voiceAvg = voiceBinsCount > 0 ? (voiceSum / voiceBinsCount) : 0;
-        // Natural speech threshold: gentle enough for normal & quiet talking, rigid enough against room silence
-        rawSpeaking = (rms > 0.0025 || !timeData) && peak > 60 && voiceAvg > 22;
+        // High precision voice gate: responsive to quiet microphones while rejecting room ambient hum
+        rawSpeaking = (rms > 0.0015 || !timeData) && peak > 35 && voiceAvg > 14;
       } else {
         rawSpeaking = false; // Silenced by RMS noise gate, saved 100% of FFT computation
       }
@@ -847,26 +846,40 @@ function pollActiveSpeakers() {
 
     if (rawSpeaking) {
       analyserData.lastSpeakingTime = now;
+    }
+    if (!isTrackLiveAndEnabled) {
+      analyserData.lastSpeakingTime = 0;
+    }
+
+    // 750ms conversational hangover ensures smooth visual glow & stable AI tracking across natural syllable gaps
+    const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || (now - analyserData.lastSpeakingTime < 750));
+
+    if (shouldBeMarkedSpeaking) {
       if (!analyserData.firstSpeakStart) {
         analyserData.firstSpeakStart = now;
-      } else if (state.autoDirectorEnabled && id !== 'local' && (now - analyserData.firstSpeakStart >= 1500)) {
-        // AI Auto-Director: automatically transition focus to the active speaker after 1.5s continuous speech
-        if (state.focusedPeerId !== id && !state.screenSharing) {
-          focusVideo(id);
-          showToast(`🤖 AI Director: Focused on active speaker`, 'info', 2000);
+      } else if (state.autoDirectorEnabled && !state.screenSharing) {
+        const speakDuration = now - analyserData.firstSpeakStart;
+        // AI Auto-Director: Automatically transition camera focus to remote speaker after 600ms of active conversation
+        if (id !== 'local' && speakDuration >= 600) {
+          if (state.focusedPeerId !== id) {
+            focusVideo(id);
+            if (typeof window.showToast === 'function') {
+              const peerName = state.peers.get(id)?.username || 'Peer';
+              window.showToast(`🤖 AI Director: Focused on active speaker (${peerName})`, 'info', 2000);
+            }
+          }
+        }
+        // If local user speaks for 1.2s while a remote tile is zoomed, revert to group grid so they can see audience reactions
+        else if (id === 'local' && speakDuration >= 1200 && state.focusedPeerId && state.focusedPeerId !== 'local') {
+          unfocusVideo();
+          if (typeof window.showToast === 'function') {
+            window.showToast(`🤖 AI Director: Returning to group grid view as you speak`, 'info', 2000);
+          }
         }
       }
     } else {
       analyserData.firstSpeakStart = 0;
     }
-
-    if (!isTrackLiveAndEnabled) {
-      analyserData.lastSpeakingTime = 0;
-      analyserData.firstSpeakStart = 0;
-    }
-
-    // 650ms hangover guarantees smooth continuous glow across natural speaking pauses between words
-    const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || (now - analyserData.lastSpeakingTime < 650));
 
     if (analyserData.speakingState !== shouldBeMarkedSpeaking) {
       analyserData.speakingState = shouldBeMarkedSpeaking;
