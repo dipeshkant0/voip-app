@@ -2915,6 +2915,11 @@ echo "Hello, World!"`
     const badges = document.querySelectorAll(".stats-badge");
     badges.forEach((b) => {
       b.style.display = "none";
+      const wrapper = b.parentElement;
+      if (wrapper) {
+        const latencyEl = wrapper.querySelector(".latency-badge");
+        if (latencyEl) latencyEl.style.opacity = "1";
+      }
     });
   }
   function cleanupPeerStats(peerId) {
@@ -2922,6 +2927,11 @@ echo "Hello, World!"`
     badgeCacheMap.delete(peerId);
     const badge = document.getElementById(`stats-badge-${peerId}`);
     if (badge) {
+      const wrapper = badge.parentElement;
+      if (wrapper) {
+        const latencyEl = wrapper.querySelector(".latency-badge");
+        if (latencyEl) latencyEl.style.opacity = "1";
+      }
       badge.remove();
     }
   }
@@ -3012,6 +3022,11 @@ echo "Hello, World!"`
       const { badgeEl, resSpan, fpsSpan, bitrateSpan, rttSpan, rttItem, lossSpan, lossItem } = cached;
       if (isStatsEnabled) {
         badgeEl.style.display = "block";
+        const wrapper = badgeEl.parentElement;
+        if (wrapper) {
+          const latencyEl = wrapper.querySelector(".latency-badge");
+          if (latencyEl) latencyEl.style.opacity = "0";
+        }
         if (resSpan) resSpan.textContent = width && height ? `${width}x${height}` : "---";
         if (fpsSpan) fpsSpan.textContent = `${fps || 0} fps`;
         if (bitrateSpan) bitrateSpan.textContent = `${kbps || 0} kbps`;
@@ -3035,6 +3050,11 @@ echo "Hello, World!"`
         }
       } else {
         badgeEl.style.display = "none";
+        const wrapper = badgeEl.parentElement;
+        if (wrapper) {
+          const latencyEl = wrapper.querySelector(".latency-badge");
+          if (latencyEl) latencyEl.style.opacity = "1";
+        }
       }
     }
   }

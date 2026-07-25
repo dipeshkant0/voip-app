@@ -71,6 +71,11 @@ function hideAllBadges() {
   const badges = document.querySelectorAll('.stats-badge');
   badges.forEach(b => {
     b.style.display = 'none';
+    const wrapper = b.parentElement;
+    if (wrapper) {
+      const latencyEl = wrapper.querySelector('.latency-badge');
+      if (latencyEl) latencyEl.style.opacity = '1';
+    }
   });
 }
 
@@ -79,6 +84,11 @@ export function cleanupPeerStats(peerId) {
   badgeCacheMap.delete(peerId);
   const badge = document.getElementById(`stats-badge-${peerId}`);
   if (badge) {
+    const wrapper = badge.parentElement;
+    if (wrapper) {
+      const latencyEl = wrapper.querySelector('.latency-badge');
+      if (latencyEl) latencyEl.style.opacity = '1';
+    }
     badge.remove();
   }
 }
@@ -186,6 +196,11 @@ function updateBadge(peerId, width, height, fps, rtt, loss, kbps) {
     const { badgeEl, resSpan, fpsSpan, bitrateSpan, rttSpan, rttItem, lossSpan, lossItem } = cached;
     if (isStatsEnabled) {
       badgeEl.style.display = 'block';
+      const wrapper = badgeEl.parentElement;
+      if (wrapper) {
+        const latencyEl = wrapper.querySelector('.latency-badge');
+        if (latencyEl) latencyEl.style.opacity = '0';
+      }
       
       if (resSpan) resSpan.textContent = width && height ? `${width}x${height}` : '---';
       if (fpsSpan) fpsSpan.textContent = `${fps || 0} fps`;
@@ -212,6 +227,11 @@ function updateBadge(peerId, width, height, fps, rtt, loss, kbps) {
       }
     } else {
       badgeEl.style.display = 'none';
+      const wrapper = badgeEl.parentElement;
+      if (wrapper) {
+        const latencyEl = wrapper.querySelector('.latency-badge');
+        if (latencyEl) latencyEl.style.opacity = '1';
+      }
     }
   }
 }

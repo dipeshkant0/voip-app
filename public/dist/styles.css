@@ -229,19 +229,20 @@ select:focus {
 /* Telemetry Diagnostics Badge */
 .stats-badge {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  background: rgba(10, 10, 10, 0.85);
+  top: 14px;
+  right: 14px;
+  left: auto;
+  background: rgba(10, 10, 15, 0.95);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #00f0ff;
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 0.72rem;
   color: #c9d1d9;
   font-family: 'Fira Code', monospace;
   pointer-events: none;
-  z-index: 30;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  z-index: 80;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
   display: none;
   transition: all 0.2s ease;
 }
