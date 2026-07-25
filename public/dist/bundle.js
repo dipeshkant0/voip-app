@@ -3218,7 +3218,8 @@ echo "Hello, World!"`
     recording: false,
     roomPassword: "",
     focusedPeerId: null,
-    autoDirectorEnabled: false
+    autoDirectorEnabled: false,
+    lastDirectorSwitchTime: 0
   };
   var mediaRecorder;
   var recordedChunks = [];
@@ -3768,20 +3769,20 @@ echo "Hello, World!"`
           }
           rms = Math.sqrt(sumSquares * 2 / len);
         }
-        if (!timeData || rms > 15e-4) {
+        if (!timeData || rms > 8e-3) {
           analyser.getByteFrequencyData(dataArray);
           let voiceSum = 0;
           let voiceBinsCount = 0;
           let peak = 0;
-          const maxBin = Math.min(dataArray.length, 64);
-          for (let i = 2; i < maxBin; i++) {
+          const maxBin = Math.min(dataArray.length, 45);
+          for (let i = 3; i < maxBin; i++) {
             const val = dataArray[i];
             voiceSum += val;
             voiceBinsCount++;
             if (val > peak) peak = val;
           }
           const voiceAvg = voiceBinsCount > 0 ? voiceSum / voiceBinsCount : 0;
-          rawSpeaking = (rms > 15e-4 || !timeData) && peak > 35 && voiceAvg > 14;
+          rawSpeaking = (rms > 8e-3 || !timeData) && peak > 75 && voiceAvg > 28;
         } else {
           rawSpeaking = false;
         }
@@ -3792,24 +3793,30 @@ echo "Hello, World!"`
       if (!isTrackLiveAndEnabled) {
         analyserData.lastSpeakingTime = 0;
       }
-      const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || now - analyserData.lastSpeakingTime < 750);
+      const shouldBeMarkedSpeaking = isTrackLiveAndEnabled && isWarmedUp && (rawSpeaking || now - analyserData.lastSpeakingTime < 600);
       if (shouldBeMarkedSpeaking) {
         if (!analyserData.firstSpeakStart) {
           analyserData.firstSpeakStart = now;
         } else if (state.autoDirectorEnabled && !state.screenSharing) {
           const speakDuration = now - analyserData.firstSpeakStart;
-          if (id !== "local" && speakDuration >= 600) {
-            if (state.focusedPeerId !== id) {
+          const timeSinceLastSwitch = now - (state.lastDirectorSwitchTime || 0);
+          if (timeSinceLastSwitch >= 5e3) {
+            if (id !== "local" && speakDuration >= 800 && state.focusedPeerId !== id) {
+              state.lastDirectorSwitchTime = now;
               focusVideo(id);
               if (typeof window.showToast === "function") {
                 const peerName = state.peers.get(id)?.username || "Peer";
-                window.showToast(`\u{1F916} AI Director: Focused on active speaker (${peerName})`, "info", 2e3);
+                window.showToast(`\u{1F916} AI Director: Focused on active speaker (${peerName})`, "info", 2500);
               }
-            }
-          } else if (id === "local" && speakDuration >= 1200 && state.focusedPeerId && state.focusedPeerId !== "local") {
-            unfocusVideo();
-            if (typeof window.showToast === "function") {
-              window.showToast(`\u{1F916} AI Director: Returning to group grid view as you speak`, "info", 2e3);
+            } else if (id === "local" && speakDuration >= 1500 && state.focusedPeerId && state.focusedPeerId !== "local") {
+              const focusedAnalyzer = state.audioAnalysers.get(state.focusedPeerId);
+              if (!focusedAnalyzer || !focusedAnalyzer.speakingState) {
+                state.lastDirectorSwitchTime = now;
+                unfocusVideo();
+                if (typeof window.showToast === "function") {
+                  window.showToast(`\u{1F916} AI Director: Returning to group grid view as you speak`, "info", 2500);
+                }
+              }
             }
           }
         }
