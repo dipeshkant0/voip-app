@@ -592,7 +592,8 @@ select:focus {
   justify-content: center;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   will-change: left, top, width, height;
-  contain: layout style;
+  contain: layout style paint;
+  backface-visibility: hidden;
   transition: left 0.35s cubic-bezier(0.25, 1, 0.5, 1),
               top 0.35s cubic-bezier(0.25, 1, 0.5, 1),
               width 0.35s cubic-bezier(0.25, 1, 0.5, 1),
@@ -1707,11 +1708,13 @@ li.CodeMirror-hint-active {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate3d(-50%, -50%, 0);
   width: 140px;
   height: 140px;
   pointer-events: none;
   z-index: 10;
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 /* 4. P2P Reaction Bursting Particles */

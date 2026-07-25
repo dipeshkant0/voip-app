@@ -121,12 +121,25 @@
     tempCanvasEl.height = height;
     videoEl.srcObject = new MediaStream([rawTrack]);
     return new Promise((resolve) => {
-      videoEl.onloadedmetadata = () => {
+      const initPlayback = () => {
         videoEl.play().then(() => {
+          if (videoEl.videoWidth && videoEl.videoHeight) {
+            let vw = videoEl.videoWidth;
+            let vh = videoEl.videoHeight;
+            if (vw > 960) {
+              const ratio = vh / vw;
+              vw = 960;
+              vh = Math.round(vw * ratio);
+            }
+            canvasEl.width = vw;
+            canvasEl.height = vh;
+            tempCanvasEl.width = vw;
+            tempCanvasEl.height = vh;
+          }
           stopLoop();
           loop();
           if (!filteredStream) {
-            filteredStream = canvasEl.captureStream(25);
+            filteredStream = canvasEl.captureStream(30);
             filteredTrack = filteredStream.getVideoTracks()[0];
             rawTrack.onended = () => {
               stopProcessing(true, true);
@@ -138,10 +151,19 @@
           resolve(rawTrack);
         });
       };
+      if (videoEl.readyState >= 1) {
+        initPlayback();
+      } else {
+        videoEl.onloadedmetadata = initPlayback;
+      }
     });
   }
   function loop() {
     if (!rawTrack || rawTrack.readyState !== "live" || currentFilter === "none") {
+      return;
+    }
+    if (videoEl.readyState < 2 || !videoEl.videoWidth || !videoEl.videoHeight) {
+      animationFrameId = requestAnimationFrame(loop);
       return;
     }
     const width = canvasEl.width;
@@ -2912,13 +2934,10 @@ echo "Hello, World!"`
     statsIntervalId = setInterval(updateStats, 2e3);
   }
   function hideAllBadges() {
-    const badges = document.querySelectorAll(".stats-badge");
-    badges.forEach((b) => {
-      b.style.display = "none";
-      const wrapper = b.parentElement;
-      if (wrapper) {
-        const latencyEl = wrapper.querySelector(".latency-badge");
-        if (latencyEl) latencyEl.style.opacity = "1";
+    badgeCacheMap.forEach((cached) => {
+      if (cached.badgeEl) cached.badgeEl.style.display = "none";
+      if (cached.latencyEl && cached.latencyEl.style.opacity !== "1") {
+        cached.latencyEl.style.opacity = "1";
       }
     });
   }
@@ -3005,8 +3024,10 @@ echo "Hello, World!"`
         }
       }
       if (badgeEl) {
+        const parentWrap = badgeEl.parentElement;
         cached = {
           badgeEl,
+          latencyEl: parentWrap ? parentWrap.querySelector(".latency-badge") : null,
           resSpan: badgeEl.querySelector(".stat-res"),
           fpsSpan: badgeEl.querySelector(".stat-fps"),
           bitrateSpan: badgeEl.querySelector(".stat-bitrate"),
@@ -3019,14 +3040,10 @@ echo "Hello, World!"`
       }
     }
     if (cached) {
-      const { badgeEl, resSpan, fpsSpan, bitrateSpan, rttSpan, rttItem, lossSpan, lossItem } = cached;
+      const { badgeEl, latencyEl, resSpan, fpsSpan, bitrateSpan, rttSpan, rttItem, lossSpan, lossItem } = cached;
       if (isStatsEnabled) {
-        badgeEl.style.display = "block";
-        const wrapper = badgeEl.parentElement;
-        if (wrapper) {
-          const latencyEl = wrapper.querySelector(".latency-badge");
-          if (latencyEl) latencyEl.style.opacity = "0";
-        }
+        if (badgeEl.style.display !== "block") badgeEl.style.display = "block";
+        if (latencyEl && latencyEl.style.opacity !== "0") latencyEl.style.opacity = "0";
         if (resSpan) resSpan.textContent = width && height ? `${width}x${height}` : "---";
         if (fpsSpan) fpsSpan.textContent = `${fps || 0} fps`;
         if (bitrateSpan) bitrateSpan.textContent = `${kbps || 0} kbps`;
@@ -3052,8 +3069,8 @@ echo "Hello, World!"`
         badgeEl.style.display = "none";
         const wrapper = badgeEl.parentElement;
         if (wrapper) {
-          const latencyEl = wrapper.querySelector(".latency-badge");
-          if (latencyEl) latencyEl.style.opacity = "1";
+          const latencyEl2 = wrapper.querySelector(".latency-badge");
+          if (latencyEl2) latencyEl2.style.opacity = "1";
         }
       }
     }

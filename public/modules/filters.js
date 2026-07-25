@@ -151,13 +151,27 @@ function startProcessing() {
   videoEl.srcObject = new MediaStream([rawTrack]);
   
   return new Promise((resolve) => {
-    videoEl.onloadedmetadata = () => {
+    const initPlayback = () => {
       videoEl.play().then(() => {
+        if (videoEl.videoWidth && videoEl.videoHeight) {
+          let vw = videoEl.videoWidth;
+          let vh = videoEl.videoHeight;
+          if (vw > 960) {
+            const ratio = vh / vw;
+            vw = 960;
+            vh = Math.round(vw * ratio);
+          }
+          canvasEl.width = vw;
+          canvasEl.height = vh;
+          tempCanvasEl.width = vw;
+          tempCanvasEl.height = vh;
+        }
+        
         stopLoop();
         loop();
         
         if (!filteredStream) {
-          filteredStream = canvasEl.captureStream(25);
+          filteredStream = canvasEl.captureStream(30);
           filteredTrack = filteredStream.getVideoTracks()[0];
           
           // Propagate track end event from rawTrack
@@ -171,11 +185,22 @@ function startProcessing() {
         resolve(rawTrack);
       });
     };
+
+    if (videoEl.readyState >= 1) {
+      initPlayback();
+    } else {
+      videoEl.onloadedmetadata = initPlayback;
+    }
   });
 }
 
 function loop() {
   if (!rawTrack || rawTrack.readyState !== 'live' || currentFilter === 'none') {
+    return;
+  }
+  
+  if (videoEl.readyState < 2 || !videoEl.videoWidth || !videoEl.videoHeight) {
+    animationFrameId = requestAnimationFrame(loop);
     return;
   }
   

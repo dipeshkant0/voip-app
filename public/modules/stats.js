@@ -68,13 +68,10 @@ function startPolling() {
 }
 
 function hideAllBadges() {
-  const badges = document.querySelectorAll('.stats-badge');
-  badges.forEach(b => {
-    b.style.display = 'none';
-    const wrapper = b.parentElement;
-    if (wrapper) {
-      const latencyEl = wrapper.querySelector('.latency-badge');
-      if (latencyEl) latencyEl.style.opacity = '1';
+  badgeCacheMap.forEach((cached) => {
+    if (cached.badgeEl) cached.badgeEl.style.display = 'none';
+    if (cached.latencyEl && cached.latencyEl.style.opacity !== '1') {
+      cached.latencyEl.style.opacity = '1';
     }
   });
 }
@@ -178,8 +175,10 @@ function updateBadge(peerId, width, height, fps, rtt, loss, kbps) {
     }
     
     if (badgeEl) {
+      const parentWrap = badgeEl.parentElement;
       cached = {
         badgeEl,
+        latencyEl: parentWrap ? parentWrap.querySelector('.latency-badge') : null,
         resSpan: badgeEl.querySelector('.stat-res'),
         fpsSpan: badgeEl.querySelector('.stat-fps'),
         bitrateSpan: badgeEl.querySelector('.stat-bitrate'),
@@ -193,14 +192,10 @@ function updateBadge(peerId, width, height, fps, rtt, loss, kbps) {
   }
   
   if (cached) {
-    const { badgeEl, resSpan, fpsSpan, bitrateSpan, rttSpan, rttItem, lossSpan, lossItem } = cached;
+    const { badgeEl, latencyEl, resSpan, fpsSpan, bitrateSpan, rttSpan, rttItem, lossSpan, lossItem } = cached;
     if (isStatsEnabled) {
-      badgeEl.style.display = 'block';
-      const wrapper = badgeEl.parentElement;
-      if (wrapper) {
-        const latencyEl = wrapper.querySelector('.latency-badge');
-        if (latencyEl) latencyEl.style.opacity = '0';
-      }
+      if (badgeEl.style.display !== 'block') badgeEl.style.display = 'block';
+      if (latencyEl && latencyEl.style.opacity !== '0') latencyEl.style.opacity = '0';
       
       if (resSpan) resSpan.textContent = width && height ? `${width}x${height}` : '---';
       if (fpsSpan) fpsSpan.textContent = `${fps || 0} fps`;
